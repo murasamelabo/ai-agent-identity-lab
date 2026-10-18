@@ -1,8 +1,11 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [ValidateSet('Doctor', 'Keycloak', 'Federated', 'Report')]
+    [ValidateSet('Doctor', 'Keycloak', 'Federated', 'Report',
+        'TokenEncoded', 'TokenHeader', 'TokenPayload')]
     [string]$Action = 'Keycloak',
     [string]$Python,
+    [ValidateSet('api_a_input', 'api_b_direct', 'api_b_app_only', 'api_b_obo', 'api_b_metadata')]
+    [string]$TokenName = 'api_b_obo',
     [string]$OutputDirectory,
     [ValidateRange(30, 1800)][int]$TimeoutSeconds = 600
 )
@@ -44,6 +47,7 @@ $shellPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.e
 $arguments = @(('"{0}"' -f $shellPath), '-NoLogo', '-NoProfile', '-File', ('"{0}"' -f $worker),
     '-CompletionFile', ('"{0}"' -f $completion), '-Action', $Action, '-ExpectedTitle', ('"{0}"' -f $title))
 if ($Python) { $arguments += @('-Python', ('"{0}"' -f $Python)) }
+if ($Action -like 'Token*') { $arguments += @('-TokenName', $TokenName) }
 $process = $null
 $workerProcess = $null
 $workerStarted = $null
@@ -81,7 +85,9 @@ try {
     $caption = [Text.StringBuilder]::new(256)
     $null = [TerminalCaptureNative]::GetWindowText($handle, $caption, $caption.Capacity)
     if ($caption.ToString() -ne $title) { throw 'Window title mismatch; refusing to capture another application.' }
-    $captureHeight = if ($Action -eq 'Report') { 500 } elseif ($Action -eq 'Doctor') { 350 } else { 600 }
+    $captureHeight = if ($Action -eq 'Report') { 500 } elseif ($Action -eq 'Doctor') { 350 }
+        elseif ($Action -eq 'TokenEncoded') { 440 } elseif ($Action -eq 'TokenHeader') { 480 }
+        elseif ($Action -eq 'TokenPayload') { 700 } else { 600 }
     if (-not [TerminalCaptureNative]::SetWindowPos($handle, [IntPtr]::Zero, 10, 10, 1200, $captureHeight, 4)) {
         throw 'Cannot place the owned console window for capture.'
     }
@@ -117,7 +123,8 @@ try {
         if (-not (Test-Path -LiteralPath $OutputDirectory)) {
             $null = New-Item -ItemType Directory -Path $OutputDirectory -Force
         }
-        $output = Join-Path $OutputDirectory ('terminal-' + $Action.ToLowerInvariant() + '.png')
+        $suffix = if ($Action -like 'Token*') { '-' + $TokenName } else { '' }
+        $output = Join-Path $OutputDirectory ('terminal-' + $Action.ToLowerInvariant() + $suffix + '.png')
         $image.Save($output, [Drawing.Imaging.ImageFormat]::Png)
         Write-Output ('Captured actual native terminal: ' + $output)
     } finally {

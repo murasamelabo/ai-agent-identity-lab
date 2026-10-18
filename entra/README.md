@@ -123,6 +123,40 @@ was therefore disproved, not hidden. The dedicated missing-scope test uses
 the OBO token's **verified** `Docs.Read`-only claim on the metadata route.
 The report records both requested and actual issued scope sets.
 
+### Inspect the acquired JWTs (v1.1.0)
+
+Successful acquisition also records a strictly allowlisted `token_inspection`
+projection in the existing HMAC-bound report. It preserves a fixed safe prefix
+of the original header, redacts the remainder of the compact JWT, records the
+original segment character counts, and projects selected decoded header/claim
+fields. All payload and signature Base64url text is removed. Signing-key IDs and
+subject IDs are redacted; timestamps retain their actual integer values.
+`scp` remains a string and `roles` an array, included only if originally present.
+Other claims are omitted, not asserted absent. Decoding is not verification.
+
+After the usual successful `run` and `audit`, these commands only inspect the
+saved, sanitized observations; they do not acquire another token:
+
+```powershell
+.\.venv\Scripts\python.exe lab.py token-view --view encoded --token-name api_b_obo
+.\.venv\Scripts\python.exe lab.py token-view --view header --token-name api_b_obo
+.\.venv\Scripts\python.exe lab.py token-view --view payload --token-name api_b_app_only
+```
+
+They require the same successful report/privacy/consistency/private-binding
+checks as `verify-report`. Legacy reports remain valid but cannot invent new
+inspection evidence. Never reset acquisition counters; `resume` still has the
+existing two-attempt lifetime limit per acquisition.
+
+For a new acquisition, the optional `run --show-raw-tokens` (or an authorized
+`resume --show-raw-tokens` with attempts remaining) displays the exact validated
+JWTs **only in an unredirected local console**. This is an alternative to the
+normal run, not a second run to execute afterward. Disable transcription,
+recording and screen sharing first. Do not paste the output into external JWT
+websites, chat, issues or publications. No raw token is saved by the lab. The
+guard does not detect external recording software. Publication capture never
+enables this option.
+
 `audit` performs read-only Graph checks of both applications **and SPs**, full
 scope/role definitions and IDs, complete preauthorized scope-ID lists, and exact
 required-resource permissions. It enumerates paginated incoming grants and
@@ -144,6 +178,9 @@ It does not acquire more custom API tokens or modify cloud resources.
    alias relationships and document authorization outcomes, checks pass flags,
    and requires all expected experiments and exhaustive audit checks for a
    successful complete report. An empty `succeeded` report is not proof.
+   When present, JWT inspection also has a closed schema and must match the
+   original comparison's aliases, scopes, roles and lifetime. It is included in
+   the immutable observation digest; older reports can omit it unchanged.
 3. **Local integrity:** the exact canonical report and immutable observation
    digest are bound to the selected private run using HMAC-SHA256. The random
    HMAC key and binding remain only in the ACL-protected private state.

@@ -1,4 +1,4 @@
-﻿"""An isolated, fail-closed Entra OBO lab. No credential/token logging."""
+﻿"""An isolated Entra OBO lab. Raw tokens require explicit local-console opt-in."""
 
 from __future__ import annotations
 
@@ -821,6 +821,50 @@ def summarize_claims(claims, state):
     return result
 
 
+def inspect_verified_token(token, claims, state):
+    """Called only after signature/context validation; never retain full JWT parts."""
+    import jwt
+
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise Blocked("report", "TokenValidationFailed")
+    original_header = jwt.get_unverified_header(token)
+    header = {"alg": original_header["alg"]}
+    if "typ" in original_header:
+        header["typ"] = original_header["typ"]
+    for field in ("kid", "x5t"):
+        if field in original_header:
+            header[field] = "[REDACTED]"
+    summary = summarize_claims(claims, state)
+    payload = {field: summary[field] for field in ("ver", "iss", "aud", "azp", "oid", "tid")}
+    for field in ("iat", "nbf", "exp", "scp", "roles"):
+        if field in claims:
+            payload[field] = claims[field]
+    if "sub" in claims:
+        payload["sub"] = "[REDACTED]"
+    prefix = next(value for value in report_safety.HEADER_PREFIXES
+                  if parts[0].startswith(value))
+    result = {
+        "compact_redacted": prefix + report_safety.REDACTED_SUFFIX,
+        "segment_lengths": dict(zip(("header", "payload", "signature"), map(len, parts))),
+        "header": header, "payload": payload,
+    }
+    try:
+        report_safety.validate_inspection(result, summary)
+    except report_safety.Rejected:
+        raise Blocked("report", "ReportSchemaRejected") from None
+    return result
+
+
+def display_raw_tokens(tokens):
+    if not sys.stdout.isatty():
+        raise Blocked("report", "UnsafePublicationContent")
+    print("LOCAL ONLY: bearer credentials below. Do not record, photograph or share.")
+    for name in TOKEN_NAMES:
+        if name in tokens:
+            print(f"\n{name}\n{tokens[name]}")
+
+
 def experiments(tokens, claims, validator, state):
     import jwt
 
@@ -861,7 +905,7 @@ def experiments(tokens, claims, validator, state):
     return results
 
 
-def acquire_and_compare(store, report):
+def acquire_and_compare(store, report, *, return_raw_tokens=False):
     import jwt
 
     state = store.data
@@ -984,7 +1028,13 @@ def acquire_and_compare(store, report):
         "succeeded" if report["proof_status"] == "complete" and not report["blockers"]
         else "blocked" if report["blockers"] else "failed"
     )
+    if report["status"] == "succeeded":
+        report["token_inspection"] = {
+            name: inspect_verified_token(tokens[name], claims[name], state)
+            for name in tokens
+        }
     save_report(report, store)
+    return tokens if return_raw_tokens and report["status"] == "succeeded" else None
 
 
 def cleanup(graph, store, report):
@@ -1195,10 +1245,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command", choices=("probe", "run", "resume", "audit", "cleanup", "verify-report",
-                            "bind-existing-report", "reconcile"))
+                            "bind-existing-report", "reconcile", "token-view"))
     parser.add_argument("--run", help="Private run handle; defaults to latest private run")
+    parser.add_argument("--view", choices=("encoded", "header", "payload"), default="encoded")
+    parser.add_argument("--token-name", choices=TOKEN_NAMES, default="api_b_obo")
+    parser.add_argument("--show-raw-tokens", action="store_true",
+                        help="LOCAL CONSOLE ONLY: print newly acquired bearer credentials")
     args = parser.parse_args(argv)
-    if args.command == "verify-report":
+    if args.show_raw_tokens and (
+            args.command not in ("run", "resume") or not sys.stdout.isatty()):
+        parser.error("--show-raw-tokens requires run/resume and an unredirected local console")
+    if args.command in ("verify-report", "token-view"):
         checks = {"privacy": False, "evidence_consistency": False,
                   "local_run_integrity": False, "remote_attestation": False}
         try:
@@ -1211,9 +1268,19 @@ def main(argv=None):
             checks["local_run_integrity"] = True
         except (Blocked, OSError, ValueError, KeyError):
             pass
+        verified = all(checks[key] for key in
+                       ("privacy", "evidence_consistency", "local_run_integrity"))
+        if args.command == "token-view":
+            if verified:
+                try:
+                    print(report_safety.render_token_view(report, args.token_name, args.view))
+                    return 0
+                except report_safety.Rejected:
+                    pass
+            print("Token view unavailable: verified local inspection evidence is required.")
+            return 1
         print(json.dumps(checks, indent=2))
-        return 0 if all(checks[key] for key in
-                        ("privacy", "evidence_consistency", "local_run_integrity")) else 1
+        return 0 if verified else 1
 
     # Verify the previous binding before any rewrite; never auto-reseal a
     # tampered report. Migration is explicit and does not rerun token acquisition.
@@ -1259,6 +1326,7 @@ def main(argv=None):
                 report["experiments"] = []
                 report.pop("relationships", None)
                 report.pop("scope_observations", None)
+                report.pop("token_inspection", None)
                 report["proof_status"] = "not_started"
                 report["status"] = "running"
                 report["execution_surface"] = new_report()["execution_surface"]
@@ -1267,6 +1335,7 @@ def main(argv=None):
             "report_integrity", "ReportBindingMismatch")
         print(json.dumps({"status": "blocked", "blocker": blocker.public()}))
         return 2
+    raw_tokens = None
     try:
         if not importing:
             save_report(report, store)
@@ -1287,7 +1356,8 @@ def main(argv=None):
                     provision(graph, store, report)
                     # Allow normal directory propagation without retrying mutations.
                     time.sleep(15)
-                acquire_and_compare(store, report)
+                raw_tokens = acquire_and_compare(
+                    store, report, return_raw_tokens=args.show_raw_tokens)
     except Blocked as error:
         report["blockers"].append(error.public())
         report["status"] = "blocked"
@@ -1304,6 +1374,8 @@ def main(argv=None):
     except (Blocked, OSError, ValueError):
         print(json.dumps({"status": "blocked", "code": "ReportBindingMismatch"}))
         return 2
+    if args.show_raw_tokens and raw_tokens and report["status"] == "succeeded":
+        display_raw_tokens(raw_tokens)
     print(json.dumps({
         "status": report["status"], "proof_status": report["proof_status"],
         "verified_tokens": sorted(report["tokens"]), "blockers": report["blockers"],

@@ -28,7 +28,7 @@ npm run check --prefix keycloak
 npm run test:unit --prefix keycloak
 ```
 
-Pythonオフライン53件、Nodeオフライン10件は実テナントでの成功を示さない。Node側はnpm依存なし。必要なアクションだけを `.\scripts\lab.ps1 -Action Test` の形で選ぶ。EntraRunとFederatedを終えてからCleanupを行う。CIは認証情報なしのオフライン検査に限定する。
+Pythonオフライン65件、Nodeオフライン10件は実テナントでの成功を示さない。Node側はnpm依存なし。必要なアクションだけを `.\scripts\lab.ps1 -Action Test` の形で選ぶ。EntraRunとFederatedを終えてからCleanupを行う。CIは認証情報なしのオフライン検査に限定する。
 
 ## 禁止・要注意
 
@@ -37,5 +37,6 @@ Pythonオフライン53件、Nodeオフライン10件は実テナントでの成
 - トークン、CLI 生出力、プライベート状態／ハンドル、実 ID、環境変数、資格情報、未確認スクリーンショットを印字／コミット／外部送信しない。レポートの伏字化は認証ではない。報告前に [SECURITY.md](SECURITY.md) に従う。
 - `examples/author-run/` を新たな成功の代わりに使わない。失敗・部分成功を成功に書き換えない。実行後の `entra/reports/`、`keycloak/results/` は作業時点の成果物であり、ソースツリーには初期出力がない。
 - ランチャーとキャプチャの出力許可リストを維持する。HTMLダッシュボードではなく、実際に実行した端末の画面を用いる。
+- `-ShowRawTokens` は本人がローカル端末で明示的に選ぶ手動確認専用。AIツール／CI／撮影／ログへ渡さず、自動実行しない。公開用の `TokenEncoded`／`TokenHeader`／`TokenPayload` は同じ実行の検証済み・マスク済み抜粋だけを表示し、追加取得しない。抜粋も閉じたスキーマと観測ダイジェストで保護する。Base64urlの元ペイロードや署名を公開しない。
 
 技術的根拠と運用詳細: [entra/README.md](entra/README.md)、[keycloak/README.md](keycloak/README.md)、[keycloak/FEDERATED.md](keycloak/FEDERATED.md)。PR の手順は [CONTRIBUTING.md](CONTRIBUTING.md)。

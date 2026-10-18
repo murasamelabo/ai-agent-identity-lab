@@ -93,6 +93,8 @@ CORRECTION = (
     "Persist scope definitions before referencing them in preauthorization; "
     "no policy or permission elevation"
 )
+HEADER_PREFIXES = ("eyJ0eXAiOiJKV1Qi", "eyJhbGciOiJSUzI1", "")
+REDACTED_SUFFIX = "[HEADER_REDACTED].[PAYLOAD_REDACTED].[SIGNATURE_REDACTED]"
 
 
 class Rejected(ValueError):
@@ -141,7 +143,7 @@ def privacy(report):
         "privacy", "identity_context", "capability", "operations", "tokens",
         "experiments", "blockers", "proof_status", "token_attempts", "cleanup",
     }, {"setup_diagnostics", "relationships", "scope_observations", "resource_audit",
-        "local_error_type", "integrity"})
+        "local_error_type", "integrity", "token_inspection"})
     require(type(report["schema"]) is int and report["schema"] == 1)
     timestamp(report["started_at"])
     timestamp(report["finished_at"], nullable=True)
@@ -183,6 +185,12 @@ def privacy(report):
         members(token["scp"], SCOPES)
         members(token["roles"], ROLES)
         require(type(token["lifetime_seconds"]) is int and 0 < token["lifetime_seconds"] <= 172800)
+    if "token_inspection" in report:
+        views = report["token_inspection"]
+        shape(views, report["tokens"])
+        require(bool(views))
+        for name, value in views.items():
+            validate_inspection(value, report["tokens"][name])
     require(type(report["experiments"]) is list and len(report["experiments"]) <= len(EXPECTED))
     for item in report["experiments"]:
         shape(item, {"name", "actual", "expected", "passed"})
@@ -248,6 +256,75 @@ def privacy(report):
             "imported_existing_local_observations", "live_local_capture"})
         timestamp(report["integrity"]["bound_at"])
         require(report["integrity"]["remote_attestation"] is False)
+
+
+def validate_inspection(value, summary):
+    shape(value, {"compact_redacted", "segment_lengths", "header", "payload"})
+    enum(value["compact_redacted"], {prefix + REDACTED_SUFFIX for prefix in HEADER_PREFIXES})
+    shape(value["segment_lengths"], {"header", "payload", "signature"})
+    for length in value["segment_lengths"].values():
+        require(type(length) is int and 0 < length <= 65536)
+    header = value["header"]
+    shape(header, {"alg"}, {"typ", "kid", "x5t"})
+    enum(header["alg"], {"RS256"})
+    if "typ" in header:
+        enum(header["typ"], {"JWT", "at+jwt"})
+    for field in ("kid", "x5t"):
+        if field in header:
+            enum(header[field], {"[REDACTED]"})
+    payload = value["payload"]
+    aliases = ("ver", "iss", "aud", "azp", "oid", "tid")
+    shape(payload, {*aliases, "iat", "nbf", "exp"}, {"scp", "roles", "sub"})
+    for field in aliases:
+        require(payload[field] == summary[field])
+    for field in ("iat", "nbf", "exp"):
+        require(type(payload[field]) is int and 0 < payload[field] < 10**12)
+    require(payload["nbf"] < payload["exp"])
+    require(payload["exp"] - payload["iat"] == summary["lifetime_seconds"])
+    if "sub" in payload:
+        enum(payload["sub"], {"[REDACTED]"})
+    scopes = payload.get("scp", "")
+    require(type(scopes) is str and len(scopes) <= 64)
+    require(" ".join(scopes.split()) == scopes)
+    members(scopes.split(), SCOPES)
+    require(sorted(scopes.split()) == summary["scp"])
+    members(payload.get("roles", []), ROLES)
+    require(sorted(payload.get("roles", [])) == summary["roles"])
+
+
+def render_token_view(report, name, view):
+    privacy(report)
+    enum(name, TOKENS)
+    enum(view, {"encoded", "header", "payload"})
+    require(name in report.get("token_inspection", {}))
+    value = report["token_inspection"][name]
+    lines = [
+        f"VERIFIED ENTRA JWT - {view.upper()} (publication-redacted)",
+        f"Token: {name}",
+        "Saved sanitized evidence; no token is acquired by this view.",
+        "Source verified: RS256 signature, issuer, audience, lifetime.",
+        "",
+    ]
+    if view == "encoded":
+        lengths = value["segment_lengths"]
+        lines += [
+            value["compact_redacted"],
+            "",
+            ("Base64url lengths (characters): "
+             f"header={lengths['header']}; payload={lengths['payload']}; "
+             f"signature={lengths['signature']}"),
+            "Original header prefix only; all remaining JWT content is redacted.",
+            "This redacted text is not a usable or verifiable JWT.",
+        ]
+    else:
+        lines += [
+            json.dumps(value[view], indent=2),
+            "",
+            "Selected original fields only; identity values are redacted.",
+            "Omitted fields are not evidence of absence in the original JWT.",
+            "Decoding alone is not signature validation.",
+        ]
+    return "\n".join(lines)
 
 
 def relationships(tokens):
@@ -351,7 +428,7 @@ def canonical(report):
 
 def observation_digest(report):
     fields = ("started_at", "tokens", "experiments", "relationships",
-              "scope_observations", "token_attempts")
+              "scope_observations", "token_attempts", "token_inspection")
     return hashlib.sha256(canonical({key: report[key] for key in fields if key in report})).hexdigest()
 
 

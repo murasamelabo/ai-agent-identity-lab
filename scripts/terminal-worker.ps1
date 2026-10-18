@@ -1,8 +1,11 @@
 ﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$CompletionFile,
-    [ValidateSet('Doctor', 'Keycloak', 'Federated', 'Report')][string]$Action,
+    [ValidateSet('Doctor', 'Keycloak', 'Federated', 'Report',
+        'TokenEncoded', 'TokenHeader', 'TokenPayload')][string]$Action,
     [string]$Python,
+    [ValidateSet('api_a_input', 'api_b_direct', 'api_b_app_only', 'api_b_obo', 'api_b_metadata')]
+    [string]$TokenName = 'api_b_obo',
     [Parameter(Mandatory = $true)][string]$ExpectedTitle
 )
 $ErrorActionPreference = 'Stop'
@@ -45,7 +48,9 @@ try {
 }
 Clear-Host
 Write-Output 'AI Agent Identity Lab - actual PowerShell execution'
-Write-Output ('PS> .\scripts\lab.ps1 -Action ' + $Action)
+$command = 'PS> .\scripts\lab.ps1 -Action ' + $Action
+if ($Action -like 'Token*') { $command += ' -TokenName ' + $TokenName }
+Write-Output $command
 Write-Output ''
 $success = $false
 $failure = ''
@@ -54,6 +59,7 @@ $failureKind = ''
 try {
     $arguments = @{ Action = $Action; Screen = $true; ErrorAction = 'Stop' }
     if ($Python) { $arguments.Python = $Python }
+    if ($Action -like 'Token*') { $arguments.TokenName = $TokenName }
     $output = @(& (Join-Path $PSScriptRoot 'lab.ps1') @arguments 2>&1)
     $allowed = @(
         '^$', '^v?\d+\.\d+\.\d+$', '^Azure CLI session: Enabled; userType=(user|servicePrincipal)$',
@@ -73,7 +79,26 @@ try {
         '^api_b_direct\s+\[API_B\]\s+\[AZURE_CLI\]\s+\[USER_A\]\s+Docs\.Metadata Docs\.Read$',
         '^api_b_obo\s+\[API_B\]\s+\[API_A\]\s+\[USER_A\]\s+Docs\.Read$',
         '^Authorization checks: 9 / 9 matched their expected results\.$',
-        '^Real signed Entra tokens; document checks run locally, not an Azure-hosted API\.$'
+        '^Real signed Entra tokens; document checks run locally, not an Azure-hosted API\.$',
+        '^VERIFIED ENTRA JWT - (ENCODED|HEADER|PAYLOAD) \(publication-redacted\)$',
+        '^Token: (api_a_input|api_b_direct|api_b_app_only|api_b_obo|api_b_metadata)$',
+        '^Saved sanitized evidence; no token is acquired by this view\.$',
+        '^Source verified: RS256 signature, issuer, audience, lifetime\.$',
+        '^(eyJ0eXAiOiJKV1Qi|eyJhbGciOiJSUzI1)?\[HEADER_REDACTED\]\.\[PAYLOAD_REDACTED\]\.\[SIGNATURE_REDACTED\]$',
+        '^Base64url lengths \(characters\): header=\d{1,5}; payload=\d{1,5}; signature=\d{1,5}$',
+        '^Original header prefix only; all remaining JWT content is redacted\.$',
+        '^This redacted text is not a usable or verifiable JWT\.$',
+        '^\s*"(alg|typ)": "(RS256|JWT|at\+jwt)",?$',
+        '^\s*"(kid|x5t|sub)": "\[REDACTED\]",?$',
+        '^\s*"(iss|aud|azp|oid|tid)": "\[(TENANT_V2_ISSUER|API_A|API_B|AZURE_CLI|API_A_SP|API_B_SP|USER_A|TENANT|OTHER_ACTOR)\]",?$',
+        '^\s*"ver": "2\.0",?$',
+        '^\s*"(iat|nbf|exp)": \d{1,12},?$',
+        '^\s*"scp": "(?:(access_as_user|Docs\.Read|Docs\.Metadata)( (access_as_user|Docs\.Read|Docs\.Metadata)){0,2})?",?$',
+        '^\s*"roles": \[$', '^\s*"Docs\.Read\.All"$', '^\s*\],?$',
+        '^\s*"roles": \[\],?$',
+        '^Selected original fields only; identity values are redacted\.$',
+        '^Omitted fields are not evidence of absence in the original JWT\.$',
+        '^Decoding alone is not signature validation\.$'
     )
     foreach ($entry in $output) {
         if (-not ($allowed | Where-Object { [string]$entry -cmatch $_ })) {

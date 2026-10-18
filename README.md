@@ -16,12 +16,12 @@ Entra ID の On-Behalf-Of (OBO) と、Keycloak の実験的な ID-JAG 受信機�
 
 前提: スクリプトの実行を許可されたWindows PowerShell 5.1またはPowerShell 7、Node.js 22以上、Linuxコンテナーを使えるDocker Desktop。Python 3.11以上とAzure CLI v2はEntra実験で使います。Docker用ループバックポート **18080** を空けてください。イメージや依存関係の取得、Entraの実験にはインターネット接続が必要です。アプリ登録と同意に必要な権限は自分のテナント管理者と確認してください。組織の実行ポリシーを自動で回避する処理はありません。
 
-書籍の再現用バージョンは `v1.0.0` です。まずAzureを使わないKeycloak単独の実験を実行できます。
+書籍の再現用バージョンは `v1.1.0` です。JWTの確認表示を追加した版です。既存の `v1.0.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
 
 ```powershell
 git clone https://github.com/murasamelabo/ai-agent-identity-lab.git
 Set-Location ai-agent-identity-lab
-git checkout v1.0.0
+git checkout v1.1.0
 .\scripts\lab.ps1 -Action Setup -SkipPython
 .\scripts\lab.ps1 -Action Doctor
 .\scripts\lab.ps1 -Action Test -SkipPython
@@ -49,6 +49,40 @@ az login
 `EntraRun` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraResume` は**既にプロビジョニングが完了した実行**の継続に限り、拒否された作成の再試行には使わないでください。拒否・不確実な変更がある場合はサブフォルダの復旧手順を確認してください。`Federated` は同じ読者が実際に成功させた EntraRun の保護されたプライベート状態が必要で、モック結果による代用はありません。**すべての Federated 実行が終わってから Cleanup** を行います。
 
 `Report` は同じ実行の保護されたローカル状態で検証してから、マスク済みの実トークン比較を端末へ出力します。`examples/author-run/` は著者の過去の実行例であり、読者の実行結果ではありません。自分の出力先 `entra/reports/` と `keycloak/results/` はGitで無視します。レポートの伏字化やローカル整合性検証は、第三者による認証や安全性の証明ではありません。共有前に人間が内容を確認してください。
+
+### JWTの文字列・ヘッダー・ペイロードを確認する
+
+`v1.1.0` の `EntraRun` は署名、発行者、宛先、有効期間を検証した後に、JWTの公開用抜粋を同じ `comparison.json` の `token_inspection` に記録します。完全なJWT、Base64urlのペイロード、署名、テナントID、ユーザーID、アプリID、ドメインは保存しません。この抜粋も既存のローカルHMACと観測ダイジェストに含めます。
+
+自分の実行と `EntraAudit` が完了したら、リポジトリのルートで次を実行します。
+
+```powershell
+.\scripts\lab.ps1 -Action TokenEncoded -TokenName api_b_obo
+.\scripts\lab.ps1 -Action TokenHeader -TokenName api_b_obo
+.\scripts\lab.ps1 -Action TokenPayload -TokenName api_b_obo
+.\scripts\lab.ps1 -Action TokenPayload -TokenName api_b_app_only
+.\scripts\lab.ps1 -Action TokenPayload -TokenName api_b_direct
+```
+
+これらは取得済みの抜粋を検証・表示する操作で、追加のトークン取得やアプリ作成はありません。`TokenName` は `api_a_input`、`api_b_direct`、`api_b_app_only`、`api_b_obo`、`api_b_metadata` から選びます。省略時は `api_b_obo` です。別のPythonを使う場合は各行に `-Python $LabPython` を付けます。
+
+- `TokenEncoded`：元のヘッダーの先頭が既知の定型16文字の場合だけ残し、残りのヘッダー・ペイロード全体・署名全体を伏せた3部分の形と、元の各部分の文字数。既知の先頭でない場合はヘッダーも全体を伏せます。**この表示は使用・署名検証できるJWTではありません。**
+- `TokenHeader`：実機トークンから抽出した `alg`、存在する場合の `typ`、マスクした `kid`／`x5t`。
+- `TokenPayload`：許可したクレームだけのJSON抜粋。ID・発行者・`sub` はマスクし、元の `iat`／`nbf`／`exp` と、存在する場合の文字列 `scp`／配列 `roles` を保ちます。抜粋外の項目が表示されないことから、元のJWTにも存在しないとは判断できません。**デコードと署名検証は別です。**
+
+`v1.0.0` の結果には抜粋がないため、新しい実行の代わりに過去の結果を補完して表示しません。既存の実行を続ける場合は、取得上限が残っていることを確認して `EntraResume` を明示的に選びます。取得回数をリセットしたり、表示のたびに `EntraRun` を実行したりしないでください。
+
+#### 生JWTを手元だけで表示するオプション
+
+**録画、画面共有、ターミナルのログ／トランスクリプトを停止した、本人のローカル端末だけで使用してください。生JWTはBearer認証情報です。外部のJWTデコードサイト、チャット、Issue、書籍、Gitへ貼らないでください。Base64urlは暗号化ではなく、元のペイロードから識別情報を読み取れます。**
+
+初回実行で生JWTも確認したい場合は、上の通常の `EntraRun` **の代わりに**次を選びます。両方を実行しないでください。
+
+```powershell
+.\scripts\lab.ps1 -Action EntraRun -ShowRawTokens
+```
+
+検証とレポート保存が成功した場合に限り、その取得で検証した完全なJWTをローカルコンソールへ表示します。保存済みの抜粋から生JWTを復元する機能ではありません。`-Screen`、公開画像用アクション、OS側の標準出力がリダイレクトされた環境では拒否します。生JWTはPowerShellの出力ストリームを経由せず、子Pythonが実際のコンソールへ直接書きます。パイプや変数への代入で取り出すための機能ではありません。Pythonを直接使う場合も `lab.py run --show-raw-tokens`／`resume --show-raw-tokens` は非リダイレクトのコンソールが必要です。この制限だけで画面録画を検知できるわけではありません。
 
 ### 直接実行
 
@@ -91,11 +125,19 @@ $LabPython = Join-Path (Split-Path $AzFolder -Parent) 'python.exe'
 .\scripts\capture-terminal.ps1 -Action Report
 # 別のPythonを使う場合
 .\scripts\capture-terminal.ps1 -Action Report -Python $LabPython
+# 取得済みJWTのマスク済み表示だけを撮影
+.\scripts\capture-terminal.ps1 -Action TokenEncoded -TokenName api_b_obo -Python $LabPython
+.\scripts\capture-terminal.ps1 -Action TokenHeader -TokenName api_b_obo -Python $LabPython
+.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_obo -Python $LabPython
+.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_app_only -Python $LabPython
+.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_direct -Python $LabPython
 ```
 
 `Keycloak` と `Federated` はこの撮影でも実際に再実行されます。`Report` は取得済みの実測結果を検証して表示する操作で、新たなトークン取得ではありません。対話可能なWindowsデスクトップが必要です。画像は既定で `artifacts/screenshots/` に保存し、書籍用には `-OutputDirectory` で指定します。
+`TokenEncoded`／`TokenHeader`／`TokenPayload` も取得済みのマスク済み実測を表示します。ファイル名にはトークン名を含め、3種類のペイロードを上書きせず撮影できます。キャプチャには生JWTを表示するオプションはありません。
 
 実際の診断出力はメモリー内で受け取り、許可した検査名・応答・別名だけを端末へ出します。未知の出力、コマンド失敗、所有者を確認できないウィンドウ、空の画像では成功画像を保存しません。撮影後は、完了表示、可読性、伏字を目視で確認してください。`docs/screenshots/` は著者が実際に撮影した画面です。
+JWTの掲載画像は可読性のため、撮影した画素からウィンドウ枠と空白の余白だけを切り取っています。文字の再描画や結果の差し替えはしていません。新しい実測のマスク済みJSONは [examples/author-run/jwt-inspection-comparison.json](examples/author-run/jwt-inspection-comparison.json) です。
 撮影時は読みやすいように主な8件を短い検査名で表示します。36件すべての成否を検証した上での抜粋であり、未表示の検査を省略実行するわけではありません。
 
 `-TimeoutSeconds` は画像の採用期限です。期限を超えても検証処理を強制終了せず、コンテナーなどの片付けが完了するまで待って画像を不採用にします。途中で強制停止した場合は、個別の復旧手順に従って所有する検証資材だけを確認してください。
@@ -114,11 +156,23 @@ Reportは取得済みのEntra実測の検証・表示、残り二つは撮影時
 
 ![実際のFederated実行画面](docs/screenshots/terminal-federated.png)
 
+JWT追加検証の実際の端末画面です。元のJWTをそのまま公開した画像ではありません。
+
+![JWTの3部分と元の文字数](docs/screenshots/terminal-tokenencoded-api_b_obo.png)
+
+![OBOトークンのヘッダー抜粋](docs/screenshots/terminal-tokenheader-api_b_obo.png)
+
+![OBOトークンのペイロード抜粋](docs/screenshots/terminal-tokenpayload-api_b_obo.png)
+
+![app-onlyトークンのペイロード抜粋](docs/screenshots/terminal-tokenpayload-api_b_app_only.png)
+
+![直接委任トークンのペイロード抜粋](docs/screenshots/terminal-tokenpayload-api_b_direct.png)
+
 ## リポジトリ
 
 - `entra/lab.py`, `entra/report_safety.py`, `entra/lab-manifest.json`, `entra/requirements.txt`：Entra実験と報告の検証。
 - `keycloak/run.mjs`, `keycloak/federated-mcp.mjs`, `keycloak/package.json`：Keycloak単独／オプション連携。既定のループバックポートは18080。
-- `entra/test_*.py`, `keycloak/*.test.mjs`：53件のPythonと10件のNodeオフラインテスト。受信機／連携の各36件の統合チェックには実サービスが必要です。
+- `entra/test_*.py`, `keycloak/*.test.mjs`：65件のPythonと10件のNodeオフラインテスト。受信機／連携の各36件の統合チェックには実サービスが必要です。
 - `examples/author-run/`：著者の実行例。自分の成功の証拠ではありません。
 
 ## AI支援ツールを使う場合

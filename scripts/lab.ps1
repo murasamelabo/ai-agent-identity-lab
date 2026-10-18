@@ -1,20 +1,33 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [ValidateSet('Setup', 'Doctor', 'Test', 'Keycloak', 'EntraProbe', 'EntraRun',
-        'EntraResume', 'EntraAudit', 'EntraVerify', 'Federated', 'Cleanup', 'Report')]
+        'EntraResume', 'EntraAudit', 'EntraVerify', 'Federated', 'Cleanup', 'Report',
+        'TokenEncoded', 'TokenHeader', 'TokenPayload')]
     [string]$Action = 'Doctor',
 
     [string]$Python,
 
     [switch]$SkipPython,
 
-    [switch]$Screen
+    [switch]$Screen,
+
+    [ValidateSet('api_a_input', 'api_b_direct', 'api_b_app_only', 'api_b_obo', 'api_b_metadata')]
+    [string]$TokenName = 'api_b_obo',
+
+    [switch]$ShowRawTokens
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path -Parent $PSScriptRoot
 $venvPython = Join-Path $root '.venv\Scripts\python.exe'
+if ($ShowRawTokens -and ($Screen -or $Action -notin @('EntraRun', 'EntraResume') -or
+        [Console]::IsOutputRedirected)) {
+    throw 'Raw tokens require EntraRun/EntraResume in an unredirected local console, never Screen.'
+}
+if ($PSBoundParameters.ContainsKey('TokenName') -and $Action -notlike 'Token*') {
+    throw 'TokenName is supported only for TokenEncoded, TokenHeader and TokenPayload.'
+}
 
 function Invoke-Checked {
     param([string]$Executable, [string[]]$Arguments)
@@ -22,7 +35,7 @@ function Invoke-Checked {
 }
 
 function Invoke-Private {
-    param([string]$Executable, [string[]]$Arguments)
+    param([string]$Executable, [string[]]$Arguments, [switch]$RawTokenOutput)
     $command = (Get-Command $Executable -ErrorAction Stop).Source
     $info = New-Object Diagnostics.ProcessStartInfo
     $quoted = @($Arguments | ForEach-Object {
@@ -40,23 +53,25 @@ function Invoke-Private {
     }
     $info.WorkingDirectory = (Get-Location).Path
     $info.UseShellExecute = $false
-    $info.CreateNoWindow = $true
-    $info.RedirectStandardOutput = $true
+    $info.CreateNoWindow = -not $RawTokenOutput
+    $info.RedirectStandardOutput = -not $RawTokenOutput
     $info.RedirectStandardError = $true
-    $info.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    if (-not $RawTokenOutput) {
+        $info.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    }
     $info.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $info
     try {
         $null = $process.Start()
-        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stdout = if (-not $RawTokenOutput) { $process.StandardOutput.ReadToEndAsync() }
         $stderr = $process.StandardError.ReadToEndAsync()
         $process.WaitForExit()
         $null = $stderr.Result
         if ($process.ExitCode -ne 0) {
             throw 'Command failed. Native diagnostics were suppressed to protect identity information.'
         }
-        $stdout.Result.TrimEnd("`r", "`n") -split '\r?\n'
+        if (-not $RawTokenOutput) { $stdout.Result.TrimEnd("`r", "`n") -split '\r?\n' }
     } finally { $process.Dispose() }
 }
 
@@ -194,13 +209,22 @@ try {
             $commands = @{
                 EntraProbe = 'probe'; EntraRun = 'run'; EntraResume = 'resume'
                 EntraAudit = 'audit'; EntraVerify = 'verify-report'; Cleanup = 'cleanup'
-                Report = 'verify-report'
+                Report = 'verify-report'; TokenEncoded = 'token-view'
+                TokenHeader = 'token-view'; TokenPayload = 'token-view'
             }
             $runtime = Get-LabPython
             Push-Location -LiteralPath (Join-Path $root 'entra')
-            try { Invoke-Checked -Executable $runtime -Arguments @('-X', 'utf8', '-B', 'lab.py', $commands[$Action]) }
+            try {
+                $arguments = @('-X', 'utf8', '-B', 'lab.py', $commands[$Action])
+                if ($Action -like 'Token*') {
+                    $arguments += @('--view', $Action.Substring(5).ToLowerInvariant(),
+                        '--token-name', $TokenName)
+                }
+                if ($ShowRawTokens) { $arguments += '--show-raw-tokens' }
+                Invoke-Private -Executable $runtime -Arguments $arguments -RawTokenOutput:$ShowRawTokens
+            }
             finally { Pop-Location }
-            if ($Screen -or $Action -eq 'Report') { Write-Result }
+            if ($Action -eq 'Report' -or ($Screen -and $Action -notlike 'Token*')) { Write-Result }
         }
     }
 } finally {
