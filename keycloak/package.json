@@ -1,0 +1,16 @@
+﻿{
+  "name": "keycloak-idjag-receiver-lab",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Local-only, dependency-free Keycloak ID-JAG receiver experiment",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node run.mjs",
+    "test:federated": "node run.mjs --federated-mcp",
+    "test:ownership": "node --test owned-container.test.mjs",
+    "test:unit": "node --test owned-container.test.mjs federated-mcp.test.mjs",
+    "check": "node --check run.mjs && node --check owned-container.mjs && node --check owned-container.test.mjs && node --check federated-mcp.mjs && node --check federated-mcp.test.mjs"
+  }
+}

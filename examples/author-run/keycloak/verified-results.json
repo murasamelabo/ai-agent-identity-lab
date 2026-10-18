@@ -1,0 +1,272 @@
+﻿{
+  "schema": "shoten.keycloak-idjag-receiver-results.v1",
+  "started_at": "2026-10-18T04:18:47.793Z",
+  "completed_at": "2026-10-18T04:19:27.952Z",
+  "runtime": {
+    "node": "v24.18.0",
+    "keycloak": "26.8.1",
+    "image_digest": "sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244"
+  },
+  "configuration": {
+    "receiver": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+    "external_issuer": "http://127.0.0.1:18080/custom-issuer",
+    "issuer_implementation": "custom in-process fixture signer; no issuer HTTP service or user login",
+    "assertion_typ": "oauth-id-jag+jwt",
+    "enabled_features": [
+      "jwt-authorization-grant",
+      "identity-assertion-jwt",
+      "token-exchange-standard"
+    ],
+    "trust": "explicit static ephemeral RSA public key, exact issuer, client allowlist, linked subject",
+    "assertion_lifetime_seconds": 120,
+    "configured_max_allowed_assertion_expiration_seconds": 180,
+    "replay_allowed": false,
+    "network_binding": "127.0.0.1:18080"
+  },
+  "verified_access_token_context": {
+    "signature_verified_with_receiver_jwks": true,
+    "issuer": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+    "subject": "<linked-local-user>",
+    "authorized_party": "receiver-client",
+    "audience": [
+      "lab-api",
+      "account"
+    ],
+    "scope": "profile lab.read email"
+  },
+  "verified_exchanged_access_token_context": {
+    "signature_verified_with_receiver_jwks": true,
+    "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+    "issuer": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+    "subject": "<linked-local-user>",
+    "authorized_party": "receiver-client",
+    "audience": [
+      "lab-api",
+      "account"
+    ],
+    "scope": "profile lab.read email"
+  },
+  "tests": [
+    {
+      "name": "container_name_collision_preserves_existing_owned_fixture",
+      "passed": true
+    },
+    {
+      "name": "collision_fixture_cleanup_uses_verified_exact_id",
+      "passed": true
+    },
+    {
+      "name": "idjag_receiver_accepts_valid_assertion",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "issued_access_token_signature_issuer_subject_client_audience_scope",
+      "passed": true
+    },
+    {
+      "name": "non_audience_client_introspection_reports_inactive",
+      "passed": true,
+      "http_status": 200,
+      "active": false
+    },
+    {
+      "name": "resource_audience_access_token_introspection",
+      "passed": true,
+      "http_status": 200,
+      "active": true
+    },
+    {
+      "name": "idjag_replay_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_client_binding_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_missing_client_binding_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_missing_iat_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_missing_jti_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_missing_exp_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_wrong_audience_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_multiple_audiences_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_untrusted_issuer_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_unlinked_subject_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_untrusted_signing_key_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_expired_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_future_nbf_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_future_iat_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_too_old_iat_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "invalid_client_credentials_rejected",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "unauthorized_client"
+    },
+    {
+      "name": "client_grant_disabled_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "client_issuer_not_allowed_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "rfc7523_plain_jwt_without_client_id_accepted",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "rfc7523_plain_jwt_mismatched_client_id_accepted",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "unrecognized_typ_uses_generic_jwt_validator",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "idjag_long_exp_with_iat_is_accepted_not_a_lifetime_cap",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "rfc7523_long_exp_without_iat_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "receiver_access_token_exp_limited_by_assertion",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "rfc8693_access_token_exchange_control",
+      "passed": true,
+      "http_status": 200,
+      "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+      "signature_issuer_subject_client_audience_scope_verified": true
+    },
+    {
+      "name": "native_idjag_issuance_via_rfc8693_not_supported",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_request",
+      "verified_reason": "unsupported requested token type"
+    },
+    {
+      "name": "resource_accepts_receiver_access_token",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "resource_rejects_identity_assertion_as_bearer",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
+      "name": "resource_rejects_missing_token",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
+      "name": "resource_audience_validation_rejects_another_api",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "limitations": [
+    "Experimental Keycloak ID-JAG receiver based on its documented draft-01; not a conformance certification.",
+    "Custom signer creates synthetic fixtures, not an enterprise IdP or native Keycloak ID-JAG issuer.",
+    "RFC 7523 is separately accepted; unrecognized typ dispatches to generic validation.",
+    "The configured maxAllowedAssertionExpiration limits iat age and replay-cache lifespan, not exp minus iat. Main fixtures expire in 120 seconds, below the configured 180 seconds.",
+    "No OIDC authorization-code login, ID-token-to-ID-JAG exchange, MCP protocol, or full MCP EMA flow.",
+    "Resource is a minimal HTTP JWT verifier, not an MCP server.",
+    "HTTP and bootstrap password grant are local-only development conveniences, not production guidance.",
+    "Single-node replay tests do not certify cluster, restart, or concurrent replay behavior."
+  ],
+  "cleanup": {
+    "container_name": "shoten-idjag-3887696b-cb28-4911-908d-a087275b096a",
+    "container_id": "a8d8b6cb401a6ee5ae2f73c78d085dd87e0003ce680a1db4d180e93945f5bf3f",
+    "removed": true,
+    "local_servers_closed": true,
+    "services_left_running": false
+  }
+}

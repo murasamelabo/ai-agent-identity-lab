@@ -1,0 +1,48 @@
+﻿{
+  "checked_at": "2026-10-18T04:19:47.859170+00:00",
+  "offline_unittests": {
+    "count": 53,
+    "passed": true
+  },
+  "report_gates": {
+    "privacy": true,
+    "evidence_consistency": true,
+    "local_run_integrity": true,
+    "remote_attestation": false
+  },
+  "integrity_origin": "imported_existing_local_observations",
+  "historical_observations_preserved": true,
+  "extra_custom_api_token_acquisitions_this_revision": 0,
+  "cloud_mutations_this_revision": 0,
+  "publication_scan": {
+    "files_checked": 12,
+    "private_identifiers_secrets_or_raw_jwts_found": false,
+    "utf8_bom_all": true
+  },
+  "private_storage_acl": {
+    "directory_inheritance_disabled": true,
+    "only_current_user_access": true,
+    "state_inherits_private_directory": true
+  },
+  "real_proof": {
+    "status": "complete",
+    "verified_token_count": 5,
+    "authorization_checks_passed": 9,
+    "authorization_checks_total": 9,
+    "audit_checks_passed": 25,
+    "audit_checks_total": 25
+  },
+  "public_privilege_posture": {
+    "exact_assigned_role_names_exported": false,
+    "role_capability_boolean_only": true
+  },
+  "cloud_cleanup": "Not requested; existing two dedicated apps remain; no new provisioning",
+  "local_installation_scratch": "Ignored .venv and .pip-work remain from prior run; shell guard blocked recursive cleanup",
+  "residual_failure_path_regressions": {
+    "confirmed_refusal_allows_known_cleanup": true,
+    "timeout_not_assumed_refused": true,
+    "failed_public_replace_old_report_cleanup": true,
+    "failed_private_finalize_new_report_cleanup": true,
+    "arbitrary_report_tampering_rejected": true
+  }
+}

@@ -1,0 +1,42 @@
+﻿{
+  "name": "shoten21-obo",
+  "maximum_new_applications": 2,
+  "application_names": ["[RUN_PREFIX]-api-a", "[RUN_PREFIX]-api-b"],
+  "audience_version": 2,
+  "api_a": {
+    "delegated_scopes": ["access_as_user"],
+    "credentials": "One client secret, expires within 24 hours",
+    "downstream": "[API_B]"
+  },
+  "api_b": {
+    "delegated_scopes": ["Docs.Read", "Docs.Metadata"],
+    "application_roles": ["Docs.Read.All"],
+    "credentials": "None"
+  },
+  "consent": {
+    "type": "Principal",
+    "principal": "[USER_A]",
+    "relationships": [
+      ["[AZURE_CLI]", "[API_A]", "access_as_user"],
+      ["[AZURE_CLI]", "[API_B]", "Docs.Read Docs.Metadata"],
+      ["[API_A]", "[API_B]", "Docs.Read"]
+    ],
+    "application_role_assignment": ["[API_A_SP]", "[API_B_SP]", "Docs.Read.All"],
+    "preauthorized_client": "The existing public Azure CLI client, only for these new custom scopes"
+  },
+  "obo_protocol": {
+    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    "requested_token_use": "on_behalf_of",
+    "not": "RFC 8693 token exchange"
+  },
+  "prohibited": [
+    "Tenant policy edits",
+    "AllPrincipals delegated grants",
+    "Microsoft Graph permission grants or new Graph scopes",
+    "Existing application configuration edits",
+    "New users",
+    "Refresh-token/cache extraction",
+    "Interactive login or MFA bypass",
+    "Raw token or credential publication"
+  ]
+}

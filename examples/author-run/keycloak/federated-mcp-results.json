@@ -1,0 +1,267 @@
+﻿{
+  "schema": "shoten.entra-custom-broker-keycloak-mcp-results.v1",
+  "proof_status": "prototype_core_flow_verified_not_ema_conformance",
+  "specification": {
+    "mcp_protocol_version": "2025-11-25",
+    "ema_status": "stable",
+    "ema_source_revision": "e5eef546e4fc025ceaee6a935aa33cb4cd904b4f",
+    "ema_source": "https://github.com/modelcontextprotocol/ext-auth/blob/e5eef546e4fc025ceaee6a935aa33cb4cd904b4f/specification/stable/enterprise-managed-authorization.mdx"
+  },
+  "verified_entra_bootstrap": {
+    "real_signed_user_token": true,
+    "acquisition": "supported Azure CLI; pre-existing login; one silent acquisition",
+    "signature_issuer_audience_expiry_tenant_user_verified": true,
+    "issuer": "<ENTRA_TENANT_ISSUER>",
+    "audience": "<OWN_API_A>",
+    "subject": "<SIGNED_IN_USER>",
+    "authorized_party": "<AZURE_CLI>",
+    "required_scope": "access_as_user"
+  },
+  "endpoints": {
+    "custom_broker_issuer": "http://127.0.0.1:61794",
+    "custom_broker_token": "http://127.0.0.1:61794/token",
+    "keycloak_receiver": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+    "mcp_resource": "http://127.0.0.1:61795/mcp",
+    "protected_resource_metadata": "http://127.0.0.1:61795/.well-known/oauth-protected-resource/mcp"
+  },
+  "verified_idjag_context": {
+    "issuer": "<CUSTOM_LOCAL_BROKER_NOT_ENTRA>",
+    "subject": "<MAPPED_VERIFIED_ENTRA_USER>",
+    "audience": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+    "client_id": "mcp-ema-client",
+    "resource": "http://127.0.0.1:61795/mcp",
+    "scope": "mcp.read",
+    "typ": "oauth-id-jag+jwt",
+    "signature_verified": true
+  },
+  "verified_mcp_access_token_context": {
+    "issuer": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+    "subject": "<LINKED_LOCAL_USER>",
+    "authorized_party": "mcp-ema-client",
+    "audience": "http://127.0.0.1:61795/mcp",
+    "scope": "mcp.read",
+    "signature_verified": true
+  },
+  "verified_tool_result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Synthetic Alice document: Entra-backed MCP authorization succeeded."
+      }
+    ],
+    "isError": false
+  },
+  "receiver_advertises_idjag_grant_profile": false,
+  "tests": [
+    {
+      "name": "container_name_collision_preserves_existing_owned_fixture",
+      "passed": true
+    },
+    {
+      "name": "collision_fixture_cleanup_uses_verified_exact_id",
+      "passed": true
+    },
+    {
+      "name": "real_entra_user_signature_issuer_audience_expiry_scope_verified",
+      "passed": true
+    },
+    {
+      "name": "real_entra_token_wrong_api_audience_rejected",
+      "passed": true
+    },
+    {
+      "name": "real_entra_token_missing_required_user_scope_rejected",
+      "passed": true
+    },
+    {
+      "name": "mcp_missing_token_challenges_with_protected_resource_metadata",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
+      "name": "mcp_rfc9728_protected_resource_metadata",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "custom_broker_metadata",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "native_keycloak_metadata_observed_without_fabricated_idjag_profile",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "broker_rejects_unregistered_target_audience",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_target"
+    },
+    {
+      "name": "broker_rejects_unapproved_resource",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_target"
+    },
+    {
+      "name": "broker_rejects_unapproved_scope",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_scope"
+    },
+    {
+      "name": "broker_rejects_wrong_client_secret",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_client"
+    },
+    {
+      "name": "broker_rejects_invalid_subject_token",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "custom_broker_issues_and_client_verifies_real_entra_backed_idjag",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "custom_broker_one_use_bootstrap_replay_policy",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "native_keycloak_accepts_idjag_and_issues_exact_mcp_audience_token",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "native_keycloak_rejects_idjag_replay",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "real_keycloak_token_wrong_resource_audience_rejected",
+      "passed": true
+    },
+    {
+      "name": "real_keycloak_token_missing_required_admin_scope_rejected",
+      "passed": true
+    },
+    {
+      "name": "mcp_rejects_original_entra_token_as_resource_bearer",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
+      "name": "mcp_rejects_idjag_as_resource_bearer",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
+      "name": "mcp_rejects_tampered_access_token",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
+      "name": "mcp_rejects_hostile_origin",
+      "passed": true,
+      "http_status": 403,
+      "oauth_error": "invalid_origin"
+    },
+    {
+      "name": "mcp_requires_initialize_before_tools",
+      "passed": true,
+      "http_status": 400
+    },
+    {
+      "name": "mcp_initialize_negotiates_pinned_protocol_and_tools",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "mcp_requires_initialized_notification",
+      "passed": true,
+      "http_status": 400
+    },
+    {
+      "name": "mcp_initialized_notification_returns_empty_202",
+      "passed": true,
+      "http_status": 202
+    },
+    {
+      "name": "mcp_rejects_unsupported_protocol_header",
+      "passed": true,
+      "http_status": 400
+    },
+    {
+      "name": "mcp_tools_list_over_authenticated_streamable_http",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "mcp_tools_call_reads_authorized_synthetic_document",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "mcp_tools_call_denies_other_synthetic_user_document",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "mcp_invalid_tool_arguments_return_jsonrpc_error",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "mcp_get_explicitly_declines_optional_sse",
+      "passed": true,
+      "http_status": 405
+    },
+    {
+      "name": "mcp_delete_terminates_session",
+      "passed": true,
+      "http_status": 204
+    },
+    {
+      "name": "mcp_terminated_session_returns_404",
+      "passed": true,
+      "http_status": 404
+    }
+  ],
+  "passed": true,
+  "limitations": [
+    "Real Entra own-API-A access token bootstraps a CUSTOM local broker. This is not native Entra ID-JAG issuance.",
+    "Stable EMA uses an SSO ID token/refresh token or SAML assertion. This prototype deliberately uses an API-A user access token; no OIDC login UI or full standard EMA bootstrap is shown.",
+    "Keycloak 26.8.1 experimental receiver targets documented ID-JAG draft-01; stable EMA references draft-04. No conformance or general interoperability certification.",
+    "The one-resource receiver client is explicitly provisioned locally; fixed audience/scope mapping constrains output. Native validation of every later-draft resource/scope processing rule is not claimed.",
+    "MCP 2025-11-25 JSON-response Streamable HTTP subset: initialize, initialized notification, tools/list, tools/call, session header, GET 405, DELETE. No SSE, resumability, sampling, prompts, elicitation, or full SDK compatibility certification.",
+    "All documents are synthetic. Existing Azure CLI login is a prerequisite; no new Entra resources, permissions, interactive login, cache scraping or cloud mutations.",
+    "Custom one-use bootstrap-token hash policy is lab policy, not Entra-native token revocation. Keycloak ID-JAG replay prevention is tested separately.",
+    "HTTP loopback and static ephemeral-key trust are development-only. No production deployment, group-policy management UI, distributed replay or immediate cross-domain revocation is demonstrated."
+  ],
+  "started_at": "2026-10-18T04:19:29.005Z",
+  "completed_at": "2026-10-18T04:20:03.473Z",
+  "runtime": {
+    "node": "v24.18.0",
+    "keycloak": "26.8.1",
+    "image_digest": "sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244"
+  },
+  "cleanup": {
+    "container_name": "shoten-idjag-47373103-b379-4898-88d9-2f2d8955f767",
+    "container_id": "5512a50cfcdf932d8672525ea784e5b1b9a5cf001ec40171ac8f9fbb14ed7e1c",
+    "removed": true,
+    "local_servers_closed": true,
+    "services_left_running": false
+  }
+}

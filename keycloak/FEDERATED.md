@@ -1,0 +1,227 @@
+﻿# Real Entra → custom broker → Keycloak → protected MCP prototype
+
+## What this proves—and what it does not
+
+This optional mode executes the complete **prototype core authorization path**:
+
+1. A supported Azure CLI command silently obtains a **real Entra user access
+   token for the existing lab's own API A**.
+2. Before starting either local HTTP server, the runner independently verifies
+   its RS256 signature using the expected tenant's HTTPS OIDC metadata/JWKS,
+   exact issuer, own-API-A audience, expiry/not-before/issued-at, tenant, known
+   signed-in user, Azure CLI authorized party, v2 format, and `access_as_user`.
+3. An explicitly **CUSTOM local enterprise broker** acts as the local API-A
+   component. Its HTTP token endpoint authenticates a pre-registered local
+   client and evaluates an exact audience/resource/scope allowlist.
+4. The custom broker returns a signed `oauth-id-jag+jwt` assertion through an
+   RFC 8693-shaped token exchange. The client independently verifies it.
+5. The **real Keycloak 26.8.1 experimental receiver** accepts it through the
+   RFC 7523 JWT authorization grant, enforces client binding and assertion
+   replay prevention, and issues its own access token.
+6. A genuine minimal MCP HTTP client/server pair negotiates **MCP 2025-11-25**,
+   sends the initialized notification, lists tools, calls the read-only
+   synthetic-document tool, and terminates its session. The resource verifies
+   the Keycloak token's signature and exact audience, client, linked user,
+   scope, and lifetime on every MCP request.
+
+**This is not native Entra ID-JAG issuance, not native Keycloak ID-JAG issuance,
+and not stable EMA conformance.** Entra issues the API-A access token; the
+**custom** component issues ID-JAG. The stable EMA profile's SSO bootstrap uses
+an ID token/refresh token or SAML assertion; this prototype instead uses a
+validated API-A delegated access token. It deliberately does not pretend that
+an access token is an ID token.
+
+The native receiver's documented implementation is draft-01-based, whereas the
+stable EMA document inspected here references ID-JAG draft-04. Fixed local client
+configuration maps one allowed MCP scope to one exact resource audience; this
+is not evidence that Keycloak implements every later-draft resource/scope rule.
+
+## Prerequisites
+
+- Windows, Node.js 22+, Docker Desktop Linux containers, existing Azure CLI.
+- The pinned Keycloak image from [README.md](README.md), already pulled.
+- The sibling Entra lab has already provisioned its **two** dedicated apps and
+  established per-user consent for API A. **Do not rerun provisioning**.
+- An existing authorized Azure CLI login already has silent access to that API.
+  No new login screen, browser flow, or cache scraping is performed.
+- The Entra lab's protected private state remains at its existing
+  `%LOCALAPPDATA%\Shoten21IdentityLab\<private-run>\state.json`.
+  The selector prefers `latest.json` and supports legacy `latest.txt`.
+
+The extension reads the existing protected JSON into memory and selects only
+the tenant/user and own API-A/API-B identifiers needed for validation. It never
+copies the private state into the repository, prints
+its identifiers or private path, uses its app secret, modifies the state,
+calls Graph, changes consent, or creates an Azure resource.
+
+The internally captured supported command is:
+
+```text
+az account get-access-token --tenant <private-tenant> --scope api://<own-api-a>/access_as_user --only-show-errors --output json
+```
+
+**Do not run that command in a publication transcript**: its normal output
+contains a bearer token. The implementation captures stdout/stderr internally
+only, retains the token in memory, and never prints or persists it. Each run
+makes **one** acquisition attempt, with no interactive fallback or automatic
+retry. If denied or scope cannot be verified, it stops before starting the
+broker or MCP server. A failed run publishes `proof_status=blocked`, not a
+success-shaped mock result. Do not repeat a denied run without explicit
+authorization; this task authorizes at most two attempts.
+
+## Reproduce
+
+From the repository root:
+
+```powershell
+Set-Location keycloak
+npm run check --silent
+npm run test:unit --silent
+node run.mjs --federated-mcp
+Get-Content -Raw -Encoding utf8 results\federated-mcp-results.json
+```
+
+Or use `npm run test:federated --silent`. No npm install is needed; all code
+uses Node's standard library. `node run.mjs` without the flag still runs the
+separate, Entra-independent receiver experiment and does not acquire a token.
+
+`KEYCLOAK_LAB_PORT` selects the Keycloak loopback host port (default 18080).
+The custom broker and MCP server bind OS-assigned **127.0.0.1** ports. Their
+exact observed URLs are saved under the public report's `endpoints`; they
+are no longer reachable after successful cleanup. No server is left running
+for screenshots, and no screenshot/diagram is generated by this code.
+
+Both the normal mode and this mode retain full-ID plus per-run nonce ownership
+checks for Docker cleanup. A real collision regression uses only this run's
+own stopped fixture. No unrelated container is started, adopted, or removed.
+Inspection failure after creation preserves full ID/nonce recovery metadata
+without permitting unverified deletion.
+
+## Actual requests and controls
+
+### Custom broker (not Entra's token endpoint)
+
+```text
+POST <custom-loopback-broker>/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+requested_token_type=urn:ietf:params:oauth:token-type:id-jag
+subject_token_type=urn:ietf:params:oauth:token-type:access_token
+subject_token=<real-own-API-A-user-access-token; memory only>
+audience=<Keycloak receiver realm issuer>
+resource=<exact MCP /mcp URL>
+scope=mcp.read
+client_id=mcp-ema-client
+client_secret=<ephemeral-broker-client-secret; memory only>
+```
+
+The response uses `issued_token_type=...:id-jag` and `token_type=N_A`, not
+Bearer. Its signed claims include exact broker issuer, pseudonymous mapped
+user subject, receiver audience, registered client ID, exact MCP resource,
+`scope=mcp.read`, `iat`, a 120-second `exp`, and unique `jti`.
+The RSA key is ephemeral and never written to disk.
+
+The allowlist rejects wrong audience/resource/scope and wrong client
+credentials **before** consuming the input token. A hash-based one-use input
+token policy rejects another successful issuance attempt with the same
+bootstrap token during this run. This is **custom lab policy**, not a claim
+that Entra makes its ordinary access tokens single-use.
+
+### Native Keycloak receiver
+
+The client presents ID-JAG to the real Keycloak token endpoint with
+`grant_type=...:jwt-bearer`, `assertion`, confidential client credentials,
+`scope=mcp.read`, and the MCP resource identifier.
+Keycloak trusts the broker's exact issuer plus explicitly configured
+ephemeral public key. Its federated subject mapping is derived from the
+cryptographically verified Entra identity, not untrusted request parameters.
+No actual Entra tenant/user/app ID is copied to the local user representation.
+
+For this receiver client, ordinary profile/email/roles default scopes are
+removed; the `basic` scope needed for standard token identity is retained.
+The custom `mcp.read` scope maps only the exact MCP resource URL as audience.
+The client verifies that the returned access token has precisely that one
+audience. Keycloak limits its expiration by the assertion lifetime.
+The test separately verifies Keycloak's ID-JAG reuse rejection.
+
+### Real minimal MCP Streamable HTTP subset
+
+- HTTP 401 challenge with RFC 9728 protected-resource metadata URL.
+- Metadata advertises the exact MCP resource and Keycloak authorization server.
+- `initialize` / protocol negotiation / `tools` capability.
+- Secure random `MCP-Session-Id`, followed by `notifications/initialized`
+  with **empty HTTP 202**.
+- Required `MCP-Protocol-Version: 2025-11-25` and session headers.
+- JSON-RPC `tools/list` and `tools/call`.
+- Input-schema validation and JSON-RPC `-32602` for invalid arguments.
+- Alice synthetic document succeeds; Bob synthetic document is a tool result
+  with `isError=true`, not a fabricated transport success.
+- HTTP GET explicitly returns **405** to decline optional SSE.
+- HTTP DELETE terminates the session; subsequent requests return **404**.
+- Loopback Host/Origin checks; hostile Origin is **403**.
+
+An original Entra API-A token, ID-JAG used directly as bearer, tampered resource
+token, and missing token are rejected at the MCP HTTP boundary. Signature-
+verified real tokens are also tested against an incorrect expected audience
+and an absent required scope. Those latter audience/scope checks are explicitly
+in-process verifier tests, not falsely presented as additional HTTP requests.
+
+This is a hand-written JSON-response Streamable HTTP subset, **not** the
+official MCP SDK and not an interoperability certification. It implements no
+SSE stream, resumability, sampling, prompts, elicitation, tasks, or LLM. The
+minimal client sends actual MCP protocol messages rather than calling an
+arbitrary JSON API and naming it MCP.
+
+## Publication-safe evidence
+
+`results\federated-mcp-results.json` contains only:
+
+- fixed aliases for actual Entra tenant, API A, signed-in user, and CLI caller;
+- verification booleans, fixed scope names, local endpoints, pinned versions;
+- native receiver / custom issuer distinctions;
+- actual successful and rejected checks, synthetic tool content;
+- exact owned container identity and verified cleanup outcomes;
+- explicit conformance gaps and limitations.
+
+No raw JWT, secret, actual cloud app/user/tenant ID, user email/name, private
+state handle, or private path belongs in the report. The local Docker UUID/name
+and loopback URLs are newly generated lab identifiers, not Entra identifiers.
+The receiver-only `verified-results.json` remains a separate evidence artifact.
+
+### Verified run on 2026-10-18
+
+The real Entra-backed run passed **36 integration checks** (including the two
+container-ownership checks), and the combined offline unit suite passed
+**10 tests**. Exactly **one** supported silent own-API-A token acquisition was
+needed. The original Entra-independent receiver suite was separately rerun and
+still passed **36 checks**.
+
+Observed loopback endpoints were broker `http://127.0.0.1:61139`, MCP resource
+`http://127.0.0.1:61140/mcp`, and Keycloak
+`http://127.0.0.1:18080/realms/idjag-receiver-lab`.
+The owned federated container
+`shoten-idjag-f1b82c95-0b69-495a-88a4-0afa7575cedf` (`7c7d032ad93f`) and its
+collision fixture were removed; both HTTP servers were closed. These endpoints
+are recorded evidence, **not services left running**.
+
+The public result was checked against the private state in memory to confirm
+that the actual tenant, user, application/service-principal IDs, credential,
+credential ID, and private run handle are absent. No private values were
+printed during that check.
+
+## Pinned official sources
+
+- [Stable EMA specification at revision e5eef546e4fc025ceaee6a935aa33cb4cd904b4f](https://github.com/modelcontextprotocol/ext-auth/blob/e5eef546e4fc025ceaee6a935aa33cb4cd904b4f/specification/stable/enterprise-managed-authorization.mdx)
+  — inspected 2026-10-18; explicitly **Stable**, ID-JAG draft-04 references.
+- [MCP 2025-11-25 lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)
+- [MCP 2025-11-25 Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+- [MCP 2025-11-25 tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+- [Microsoft Entra access-token validation](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens)
+- [Pinned Keycloak 26.8.1 ID-JAG receiver documentation](https://github.com/keycloak/keycloak/blob/26.8.1/docs/guides/securing-apps/identity-assertion-jwt-authorization-grant.adoc)
+
+Production work would require a conformant enterprise SSO/ID-JAG issuer,
+later-draft receiver processing/discovery, robust administrative trust and
+policy lifecycle, TLS, key rotation, distributed replay/revocation strategy,
+and independent protocol/interoperability testing. None is silently inferred
+from the prototype's successful core flow.

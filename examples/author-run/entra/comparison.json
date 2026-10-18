@@ -1,0 +1,300 @@
+﻿{
+  "schema": 1,
+  "started_at": "2026-10-18T03:34:00.224588+00:00",
+  "finished_at": "2026-10-18T04:21:25.032681+00:00",
+  "status": "succeeded",
+  "mode": "real-entra",
+  "privacy": "Allowlisted claims, aliases, codes, booleans only; no raw tokens",
+  "identity_context": {
+    "tenant": "[TENANT]",
+    "user": "[USER_A]",
+    "client": "[AZURE_CLI]",
+    "api_a": "[API_A]",
+    "api_b": "[API_B]",
+    "app_actor": "[API_A_SP]",
+    "alice_bob": "Synthetic local document owners, not directory users"
+  },
+  "capability": {
+    "default_user_allowed_to_create_apps": false,
+    "policy_changed": false,
+    "role_is_not_policy_bypass": true,
+    "creation_capability": "verified_by_graph_creation",
+    "application_management_role_available": true
+  },
+  "operations": [
+    {
+      "operation": "create_api_a",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_api_a_sp",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_api_b",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_api_b_sp",
+      "status": "succeeded"
+    },
+    {
+      "operation": "configure_api_b",
+      "status": "succeeded"
+    },
+    {
+      "operation": "configure_api_a",
+      "status": "succeeded"
+    },
+    {
+      "operation": "preauthorize_cli_for_api_b",
+      "status": "succeeded"
+    },
+    {
+      "operation": "preauthorize_cli_for_api_a",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_principal_only_consent",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_principal_only_consent",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_principal_only_consent",
+      "status": "succeeded"
+    },
+    {
+      "operation": "assign_new_lab_role_between_new_sps",
+      "status": "succeeded"
+    },
+    {
+      "operation": "create_24h_lab_secret",
+      "status": "succeeded"
+    }
+  ],
+  "tokens": {
+    "api_a_input": {
+      "signature_issuer_audience_lifetime": "verified",
+      "ver": "2.0",
+      "aud": "[API_A]",
+      "azp": "[AZURE_CLI]",
+      "oid": "[USER_A]",
+      "tid": "[TENANT]",
+      "iss": "[TENANT_V2_ISSUER]",
+      "scp": [
+        "access_as_user"
+      ],
+      "roles": [],
+      "lifetime_seconds": 5125
+    },
+    "api_b_app_only": {
+      "signature_issuer_audience_lifetime": "verified",
+      "ver": "2.0",
+      "aud": "[API_B]",
+      "azp": "[API_A]",
+      "oid": "[API_A_SP]",
+      "tid": "[TENANT]",
+      "iss": "[TENANT_V2_ISSUER]",
+      "scp": [],
+      "roles": [
+        "Docs.Read.All"
+      ],
+      "lifetime_seconds": 3900
+    },
+    "api_b_direct": {
+      "signature_issuer_audience_lifetime": "verified",
+      "ver": "2.0",
+      "aud": "[API_B]",
+      "azp": "[AZURE_CLI]",
+      "oid": "[USER_A]",
+      "tid": "[TENANT]",
+      "iss": "[TENANT_V2_ISSUER]",
+      "scp": [
+        "Docs.Metadata",
+        "Docs.Read"
+      ],
+      "roles": [],
+      "lifetime_seconds": 5675
+    },
+    "api_b_obo": {
+      "signature_issuer_audience_lifetime": "verified",
+      "ver": "2.0",
+      "aud": "[API_B]",
+      "azp": "[API_A]",
+      "oid": "[USER_A]",
+      "tid": "[TENANT]",
+      "iss": "[TENANT_V2_ISSUER]",
+      "scp": [
+        "Docs.Read"
+      ],
+      "roles": [],
+      "lifetime_seconds": 4872
+    },
+    "api_b_metadata": {
+      "signature_issuer_audience_lifetime": "verified",
+      "ver": "2.0",
+      "aud": "[API_B]",
+      "azp": "[AZURE_CLI]",
+      "oid": "[USER_A]",
+      "tid": "[TENANT]",
+      "iss": "[TENANT_V2_ISSUER]",
+      "scp": [
+        "Docs.Metadata",
+        "Docs.Read"
+      ],
+      "roles": [],
+      "lifetime_seconds": 3983
+    }
+  },
+  "experiments": [
+    {
+      "name": "api_b_direct_alice",
+      "actual": "allow",
+      "expected": "allow",
+      "passed": true
+    },
+    {
+      "name": "api_b_direct_bob",
+      "actual": "wrong_owner",
+      "expected": "wrong_owner",
+      "passed": true
+    },
+    {
+      "name": "api_b_obo_alice",
+      "actual": "allow",
+      "expected": "allow",
+      "passed": true
+    },
+    {
+      "name": "api_b_obo_bob",
+      "actual": "wrong_owner",
+      "expected": "wrong_owner",
+      "passed": true
+    },
+    {
+      "name": "api_b_app_only_alice",
+      "actual": "allow",
+      "expected": "allow",
+      "passed": true
+    },
+    {
+      "name": "api_b_app_only_bob",
+      "actual": "allow",
+      "expected": "allow",
+      "passed": true
+    },
+    {
+      "name": "app_only_cannot_impersonate_owner",
+      "actual": "missing_scope",
+      "expected": "missing_scope",
+      "passed": true
+    },
+    {
+      "name": "obo_read_token_missing_metadata_route_scope",
+      "actual": "missing_scope",
+      "expected": "missing_scope",
+      "passed": true
+    },
+    {
+      "name": "api_a_token_rejected_by_api_b",
+      "actual": "rejected_wrong_audience",
+      "expected": "rejected_wrong_audience",
+      "passed": true
+    }
+  ],
+  "blockers": [],
+  "proof_status": "complete",
+  "token_attempts": {
+    "api_a_input": 2,
+    "api_b_app_only": 2,
+    "api_b_direct": 2,
+    "api_b_obo": 2,
+    "api_b_metadata": 2
+  },
+  "cleanup": "not_requested",
+  "setup_diagnostics": [
+    {
+      "stage": "configure_api_b",
+      "code": "InvalidValue",
+      "http_status": 400,
+      "attempts": 2,
+      "field": "preAuthorizedApplications.delegatedPermissionIds",
+      "correction": "Persist scope definitions before referencing them in preauthorization; no policy or permission elevation",
+      "resolved": true
+    }
+  ],
+  "execution_surface": "Local in-process API authorization harness; real Entra tokens",
+  "relationships": {
+    "input_cli_same_user_and_scope": true,
+    "same_v2_api_b_audience": true,
+    "direct_and_obo_same_user": true,
+    "direct_and_obo_same_tenant": true,
+    "direct_caller_is_cli": true,
+    "obo_caller_is_api_a": true,
+    "app_only_actor_is_api_a_sp": true,
+    "app_only_has_role_not_user_scope": true
+  },
+  "scope_observations": {
+    "cli_direct_requested": [
+      "Docs.Read"
+    ],
+    "cli_direct_issued": [
+      "Docs.Metadata",
+      "Docs.Read"
+    ],
+    "obo_requested": [
+      "Docs.Read"
+    ],
+    "obo_issued": [
+      "Docs.Read"
+    ],
+    "missing_scope_negative": "OBO Docs.Read token against Docs.Metadata route",
+    "cli_metadata_requested": [
+      "Docs.Metadata"
+    ],
+    "cli_metadata_issued": [
+      "Docs.Metadata",
+      "Docs.Read"
+    ],
+    "cli_metadata_request_document_decision": "allow"
+  },
+  "resource_audit": {
+    "checked_at": "2026-10-18T04:21:25.032595+00:00",
+    "checks": {
+      "api_a_v2": true,
+      "api_a_only_own_identifier_uri": true,
+      "api_a_only_cli_preauthorized": true,
+      "api_a_exact_preauthorization": true,
+      "api_a_exact_scope_definitions": true,
+      "api_a_exact_role_definitions": true,
+      "api_a_sp_exact_scope_and_role_definitions": true,
+      "api_a_exact_required_resource_access": true,
+      "api_a_exact_all_incoming_role_assignments": true,
+      "api_a_exact_all_outgoing_role_assignments": true,
+      "api_b_v2": true,
+      "api_b_only_own_identifier_uri": true,
+      "api_b_only_cli_preauthorized": true,
+      "api_b_exact_preauthorization": true,
+      "api_b_exact_scope_definitions": true,
+      "api_b_exact_role_definitions": true,
+      "api_b_sp_exact_scope_and_role_definitions": true,
+      "api_b_exact_required_resource_access": true,
+      "api_b_exact_all_incoming_role_assignments": true,
+      "api_b_exact_all_outgoing_role_assignments": true,
+      "only_new_api_b_required_resource": true,
+      "three_exact_principal_only_custom_api_grants": true,
+      "no_unrecorded_or_tenant_wide_grants": true,
+      "one_role_assignment_only_between_new_sps": true,
+      "default_user_creation_policy_unchanged": true
+    }
+  },
+  "integrity": {
+    "kind": "local_private_run_hmac",
+    "origin": "imported_existing_local_observations",
+    "bound_at": "2026-10-18T04:01:37.848651+00:00",
+    "remote_attestation": false
+  }
+}

@@ -1,0 +1,12 @@
+﻿{
+  "alice": {
+    "id": "alice-note",
+    "owner_alias": "[USER_A]",
+    "text": "Alice's synthetic document. No real user data."
+  },
+  "bob": {
+    "id": "bob-note",
+    "owner_alias": "[SYNTHETIC_BOB]",
+    "text": "Bob's synthetic document. Bob is not an Entra directory user."
+  }
+}
