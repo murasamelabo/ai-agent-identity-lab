@@ -1,9 +1,9 @@
 ﻿{
   "schema": "shoten.keycloak-idjag-receiver-results.v1",
-  "started_at": "2026-10-18T04:18:47.793Z",
-  "completed_at": "2026-10-18T04:19:27.952Z",
+  "started_at": "2026-10-25T11:58:50.333Z",
+  "completed_at": "2026-10-25T11:59:20.462Z",
   "runtime": {
-    "node": "v24.18.0",
+    "node": "v24.22.1",
     "keycloak": "26.8.1",
     "image_digest": "sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244"
   },
@@ -32,7 +32,7 @@
       "lab-api",
       "account"
     ],
-    "scope": "profile lab.read email"
+    "scope": "email lab.read profile"
   },
   "verified_exchanged_access_token_context": {
     "signature_verified_with_receiver_jwks": true,
@@ -44,7 +44,64 @@
       "lab-api",
       "account"
     ],
-    "scope": "profile lab.read email"
+    "scope": "email lab.read profile"
+  },
+  "token_inspection": {
+    "idjag": {
+      "role": "authorization_grant",
+      "direct_api_bearer_result": "HTTP 401 invalid_token",
+      "compact_redacted": "eyJhbGciOiJSUzI1.[HEADER_REDACTED].[PAYLOAD_REDACTED].[SIGNATURE_REDACTED]",
+      "segment_lengths": {
+        "header": 88,
+        "payload": 379,
+        "signature": 342
+      },
+      "header": {
+        "alg": "RS256",
+        "typ": "oauth-id-jag+jwt",
+        "kid": "[REDACTED]"
+      },
+      "payload": {
+        "iss": "http://127.0.0.1:18080/custom-issuer",
+        "sub": "synthetic-external-user",
+        "aud": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+        "client_id": "receiver-client",
+        "resource": "lab-api",
+        "scope": "lab.read",
+        "jti": "[REDACTED]",
+        "iat": 1792929559,
+        "exp": 1792929679
+      }
+    },
+    "keycloak_access_token": {
+      "role": "access_token",
+      "direct_api_bearer_result": "HTTP 200",
+      "compact_redacted": "eyJhbGciOiJSUzI1.[HEADER_REDACTED].[PAYLOAD_REDACTED].[SIGNATURE_REDACTED]",
+      "segment_lengths": {
+        "header": 111,
+        "payload": 744,
+        "signature": 342
+      },
+      "header": {
+        "alg": "RS256",
+        "typ": "JWT",
+        "kid": "[REDACTED]"
+      },
+      "payload": {
+        "iss": "http://127.0.0.1:18080/realms/idjag-receiver-lab",
+        "sub": "[LINKED_LOCAL_USER]",
+        "aud": [
+          "lab-api",
+          "account"
+        ],
+        "azp": "receiver-client",
+        "typ": "Bearer",
+        "scope": "email lab.read profile",
+        "jti": "[REDACTED]",
+        "iat": 1792929560,
+        "exp": 1792929679
+      }
+    }
   },
   "tests": [
     {
@@ -263,8 +320,8 @@
     "Single-node replay tests do not certify cluster, restart, or concurrent replay behavior."
   ],
   "cleanup": {
-    "container_name": "shoten-idjag-3887696b-cb28-4911-908d-a087275b096a",
-    "container_id": "a8d8b6cb401a6ee5ae2f73c78d085dd87e0003ce680a1db4d180e93945f5bf3f",
+    "container_name": "shoten-idjag-29a32565-b0ac-4ca8-916a-e9ad5ff22757",
+    "container_id": "9691425d186486341ba94a1791036ece085c81fda04faf83bc27b57b4de8f794",
     "removed": true,
     "local_servers_closed": true,
     "services_left_running": false

@@ -1,11 +1,14 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [ValidateSet('Doctor', 'Keycloak', 'Federated', 'Report',
+    [ValidateSet('Doctor', 'Keycloak', 'FederatedPrepare', 'FederatedRun', 'Federated',
+        'EntraPrepare', 'EntraRun', 'EntraAuthz', 'Report',
         'TokenEncoded', 'TokenHeader', 'TokenPayload')]
     [string]$Action = 'Keycloak',
     [string]$Python,
-    [ValidateSet('api_a_input', 'api_b_direct', 'api_b_app_only', 'api_b_obo', 'api_b_metadata')]
-    [string]$TokenName = 'api_b_obo',
+    [ValidateSet('app_only', 'direct', 'obo', 'agent_input', 'metadata',
+        'api_a_input', 'api_b_direct', 'api_b_app_only', 'api_b_obo', 'api_b_metadata',
+        'idjag', 'keycloak_access_token')]
+    [string]$TokenName = 'obo',
     [string]$OutputDirectory,
     [ValidateRange(30, 1800)][int]$TimeoutSeconds = 600
 )
@@ -85,9 +88,12 @@ try {
     $caption = [Text.StringBuilder]::new(256)
     $null = [TerminalCaptureNative]::GetWindowText($handle, $caption, $caption.Capacity)
     if ($caption.ToString() -ne $title) { throw 'Window title mismatch; refusing to capture another application.' }
-    $captureHeight = if ($Action -eq 'Report') { 500 } elseif ($Action -eq 'Doctor') { 350 }
-        elseif ($Action -eq 'TokenEncoded') { 440 } elseif ($Action -eq 'TokenHeader') { 480 }
-        elseif ($Action -eq 'TokenPayload') { 700 } else { 600 }
+    $captureHeight = if ($Action -eq 'Report') { 540 } elseif ($Action -eq 'Doctor') { 320 }
+        elseif ($Action -eq 'EntraPrepare') { 350 } elseif ($Action -eq 'EntraRun') { 320 }
+        elseif ($Action -eq 'EntraAuthz') { 440 } elseif ($Action -eq 'FederatedPrepare') { 370 }
+        elseif ($Action -eq 'FederatedRun') { 440 }
+        elseif ($Action -eq 'TokenEncoded') { 350 } elseif ($Action -eq 'TokenHeader') { 420 }
+        elseif ($Action -eq 'TokenPayload') { 660 } else { 540 }
     if (-not [TerminalCaptureNative]::SetWindowPos($handle, [IntPtr]::Zero, 10, 10, 1200, $captureHeight, 4)) {
         throw 'Cannot place the owned console window for capture.'
     }

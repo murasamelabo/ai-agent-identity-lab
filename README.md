@@ -16,12 +16,12 @@ Entra ID の On-Behalf-Of (OBO) と、Keycloak の実験的な ID-JAG 受信機�
 
 前提: スクリプトの実行を許可されたWindows PowerShell 5.1またはPowerShell 7、Node.js 22以上、Linuxコンテナーを使えるDocker Desktop。Python 3.11以上とAzure CLI v2はEntra実験で使います。Docker用ループバックポート **18080** を空けてください。イメージや依存関係の取得、Entraの実験にはインターネット接続が必要です。アプリ登録と同意に必要な権限は自分のテナント管理者と確認してください。組織の実行ポリシーを自動で回避する処理はありません。
 
-書籍の再現用バージョンは `v1.1.0` です。JWTの確認表示を追加した版です。既存の `v1.0.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
+書籍の再現用バージョンは `v1.2.0` です。準備と実行を分けた段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を追加した版です。既存の `v1.0.0` と `v1.1.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
 
 ```powershell
 git clone https://github.com/murasamelabo/ai-agent-identity-lab.git
 Set-Location ai-agent-identity-lab
-git checkout v1.1.0
+git checkout v1.2.0
 .\scripts\lab.ps1 -Action Setup -SkipPython
 .\scripts\lab.ps1 -Action Doctor
 .\scripts\lab.ps1 -Action Test -SkipPython
@@ -35,36 +35,38 @@ git checkout v1.1.0
 Azure CLI へのログインはランチャーの外で、権限を持つ本人が行います。**ログイン・トークン・テナント情報を含む画面を公開用キャプチャに残さないでください。** `EntraProbe` は Entra では読み取り専用ですが、保護されたローカル状態を作成します。`EntraRun` は毎回新しい実験を作るため、失敗時に安易に再実行しないでください。
 
 ```powershell
-az login
+az login --tenant "<検証用テナントID>" --allow-no-subscriptions
 .\scripts\lab.ps1 -Action Setup
-.\scripts\lab.ps1 -Action EntraProbe
+.\scripts\lab.ps1 -Action EntraPrepare
 .\scripts\lab.ps1 -Action EntraRun
-.\scripts\lab.ps1 -Action EntraAudit
-.\scripts\lab.ps1 -Action EntraVerify
-.\scripts\lab.ps1 -Action Report
-.\scripts\lab.ps1 -Action Federated
+.\scripts\lab.ps1 -Action EntraAuthz
+.\scripts\lab.ps1 -Action FederatedPrepare
+.\scripts\lab.ps1 -Action FederatedRun
 .\scripts\lab.ps1 -Action Cleanup
 ```
 
-`EntraRun` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraResume` は**既にプロビジョニングが完了した実行**の継続に限り、拒否された作成の再試行には使わないでください。拒否・不確実な変更がある場合はサブフォルダの復旧手順を確認してください。`Federated` は同じ読者が実際に成功させた EntraRun の保護されたプライベート状態が必要で、モック結果による代用はありません。**すべての Federated 実行が終わってから Cleanup** を行います。
+`EntraPrepare` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraRun` は `EntraPrepare` で準備した構成を使って 3 種類のトークンを取得・比較し、`EntraAuthz` は取得したトークンに対するローカルの認可判定を表示します。`FederatedPrepare` と `FederatedRun` は、Keycloak（Receiver）と独自 Issuer、MCP サーバーを準備して ID-JAG の交換から MCP 呼び出しまでを実行します。**すべての Federated 実行が終わってから Cleanup** を行います。
 
 `Report` は同じ実行の保護されたローカル状態で検証してから、マスク済みの実トークン比較を端末へ出力します。`examples/author-run/` は著者の過去の実行例であり、読者の実行結果ではありません。自分の出力先 `entra/reports/` と `keycloak/results/` はGitで無視します。レポートの伏字化やローカル整合性検証は、第三者による認証や安全性の証明ではありません。共有前に人間が内容を確認してください。
 
 ### JWTの文字列・ヘッダー・ペイロードを確認する
 
-`v1.1.0` の `EntraRun` は署名、発行者、宛先、有効期間を検証した後に、JWTの公開用抜粋を同じ `comparison.json` の `token_inspection` に記録します。完全なJWT、Base64urlのペイロード、署名、テナントID、ユーザーID、アプリID、ドメインは保存しません。この抜粋も既存のローカルHMACと観測ダイジェストに含めます。
+`v1.1.0` 以降の `EntraRun` は署名、発行者、宛先、有効期間を検証した後に、JWTの公開用抜粋を同じ `comparison.json` の `token_inspection` に記録します。完全なJWT、Base64urlのペイロード、署名、テナントID、ユーザーID、アプリID、ドメインは保存しません。この抜粋も既存のローカルHMACと観測ダイジェストに含めます。
 
 自分の実行と `EntraAudit` が完了したら、リポジトリのルートで次を実行します。
 
 ```powershell
-.\scripts\lab.ps1 -Action TokenEncoded -TokenName api_b_obo
-.\scripts\lab.ps1 -Action TokenHeader -TokenName api_b_obo
-.\scripts\lab.ps1 -Action TokenPayload -TokenName api_b_obo
-.\scripts\lab.ps1 -Action TokenPayload -TokenName api_b_app_only
-.\scripts\lab.ps1 -Action TokenPayload -TokenName api_b_direct
+.\scripts\lab.ps1 -Action TokenEncoded -TokenName obo
+.\scripts\lab.ps1 -Action TokenHeader -TokenName obo
+.\scripts\lab.ps1 -Action TokenPayload -TokenName app_only
+.\scripts\lab.ps1 -Action TokenPayload -TokenName direct
+.\scripts\lab.ps1 -Action TokenPayload -TokenName obo
+# Keycloak単独検証の後でID-JAGと交換後アクセストークンを比較する場合
+.\scripts\lab.ps1 -Action TokenPayload -TokenName idjag
+.\scripts\lab.ps1 -Action TokenPayload -TokenName keycloak_access_token
 ```
 
-これらは取得済みの抜粋を検証・表示する操作で、追加のトークン取得やアプリ作成はありません。`TokenName` は `api_a_input`、`api_b_direct`、`api_b_app_only`、`api_b_obo`、`api_b_metadata` から選びます。省略時は `api_b_obo` です。別のPythonを使う場合は各行に `-Python $LabPython` を付けます。
+これらは取得済みの抜粋を検証・表示する操作で、追加のトークン取得やアプリ作成はありません。`TokenName` は `app_only`、`direct`、`obo`、`agent_input`、`metadata`（Entra用）と、`idjag`、`keycloak_access_token`（Keycloak用）から選びます。省略時は `obo` です。別のPythonを使う場合はEntra用の各行に `-Python $LabPython` を付けます。
 
 - `TokenEncoded`：元のヘッダーの先頭が既知の定型16文字の場合だけ残し、残りのヘッダー・ペイロード全体・署名全体を伏せた3部分の形と、元の各部分の文字数。既知の先頭でない場合はヘッダーも全体を伏せます。**この表示は使用・署名検証できるJWTではありません。**
 - `TokenHeader`：実機トークンから抽出した `alg`、存在する場合の `typ`、マスクした `kid`／`x5t`。
@@ -131,6 +133,8 @@ $LabPython = Join-Path (Split-Path $AzFolder -Parent) 'python.exe'
 .\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_obo -Python $LabPython
 .\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_app_only -Python $LabPython
 .\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_direct -Python $LabPython
+.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName idjag
+.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName keycloak_access_token
 ```
 
 `Keycloak` と `Federated` はこの撮影でも実際に再実行されます。`Report` は取得済みの実測結果を検証して表示する操作で、新たなトークン取得ではありません。対話可能なWindowsデスクトップが必要です。画像は既定で `artifacts/screenshots/` に保存し、書籍用には `-OutputDirectory` で指定します。

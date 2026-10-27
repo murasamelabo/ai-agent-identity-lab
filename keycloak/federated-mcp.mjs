@@ -107,6 +107,130 @@ export function verifySignedJwt(jwt, jwks, issuer, audience) {
   return { header, claims };
 }
 
+export function inspectKeycloakPair(idjagJwt, accessJwt) {
+  const split = (jwt) => {
+    const parts = String(jwt ?? '').split('.');
+    requireValue(parts.length === 3, 'InvalidJwt');
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url'));
+    const claims = JSON.parse(Buffer.from(parts[1], 'base64url'));
+    const knownPrefix = Buffer.from('{"alg":"RS256",').toString('base64url').slice(0, 16);
+    const prefix = parts[0].startsWith(knownPrefix) ? `${knownPrefix}.` : '';
+    return {
+      compact_redacted: `${prefix}[HEADER_REDACTED].[PAYLOAD_REDACTED].[SIGNATURE_REDACTED]`,
+      segment_lengths: {
+        header: parts[0].length,
+        payload: parts[1].length,
+        signature: parts[2].length,
+      },
+      header,
+      claims,
+    };
+  };
+  const j = split(idjagJwt);
+  const a = split(accessJwt);
+  requireValue(j.header.alg === 'RS256' && j.header.typ === 'oauth-id-jag+jwt', 'InvalidIdJagHeader');
+  requireValue(a.header.alg === 'RS256' && a.header.typ === 'JWT', 'InvalidAccessTokenHeader');
+  return {
+    idjag: {
+      role: 'authorization_grant',
+      direct_api_bearer_result: 'HTTP 401 invalid_token',
+      compact_redacted: j.compact_redacted,
+      segment_lengths: j.segment_lengths,
+      header: {
+        alg: j.header.alg,
+        typ: j.header.typ,
+        kid: '[REDACTED]',
+      },
+      payload: {
+        iss: j.claims.iss,
+        sub: j.claims.sub === 'synthetic-external-user' ? 'synthetic-external-user' : '[MAPPED_ENTRA_USER]',
+        aud: j.claims.aud,
+        client_id: j.claims.client_id,
+        resource: j.claims.resource,
+        scope: j.claims.scope,
+        jti: '[REDACTED]',
+        iat: j.claims.iat,
+        exp: j.claims.exp,
+      },
+    },
+    keycloak_access_token: {
+      role: 'access_token',
+      direct_api_bearer_result: 'HTTP 200',
+      compact_redacted: a.compact_redacted,
+      segment_lengths: a.segment_lengths,
+      header: {
+        alg: a.header.alg,
+        typ: a.header.typ,
+        kid: '[REDACTED]',
+      },
+      payload: {
+        iss: a.claims.iss,
+        sub: '[LINKED_LOCAL_USER]',
+        aud: a.claims.aud,
+        azp: a.claims.azp,
+        typ: a.claims.typ,
+        scope: a.claims.scope,
+        jti: '[REDACTED]',
+        iat: a.claims.iat,
+        exp: a.claims.exp,
+      },
+    },
+  };
+}
+
+export function renderKeycloakTokenView(report, name, view) {
+  requireValue(report?.passed === true, 'InvalidKeycloakReport');
+  requireValue(['idjag', 'keycloak_access_token'].includes(name), 'InvalidTokenName');
+  requireValue(['encoded', 'header', 'payload'].includes(view), 'InvalidTokenView');
+  const entry = report?.token_inspection?.[name];
+  requireValue(entry && typeof entry === 'object', 'MissingTokenInspection');
+  requireValue(entry.header?.alg === 'RS256' && entry.header?.kid === '[REDACTED]', 'InvalidHeaderInspection');
+  requireValue(
+    name === 'idjag'
+      ? entry.header.typ === 'oauth-id-jag+jwt' && entry.role === 'authorization_grant' && entry.direct_api_bearer_result === 'HTTP 401 invalid_token'
+      : entry.header.typ === 'JWT' && entry.role === 'access_token' && entry.direct_api_bearer_result === 'HTTP 200',
+    'InvalidRoleOrTypeInspection',
+  );
+  const lines = [
+    `VERIFIED KEYCLOAK LAB JWT - ${view.toUpperCase()} (publication-redacted)`,
+    `Token: ${name} (role=${entry.role}; header.typ=${entry.header.typ})`,
+    'Saved sanitized evidence; no token is acquired by this view.',
+    'Source verified: RS256 signature, issuer, audience, lifetime.',
+    `Direct API Bearer check (GET /resource): ${entry.direct_api_bearer_result}`,
+    '',
+  ];
+  if (view === 'encoded') {
+    const lengths = entry.segment_lengths;
+    lines.push(
+      entry.compact_redacted,
+      '',
+      `Base64url lengths (characters): header=${lengths.header}; payload=${lengths.payload}; signature=${lengths.signature}`,
+      'Original header prefix only; all remaining JWT content is redacted.',
+      'This redacted text is not a usable or verifiable JWT.',
+    );
+  } else if (view === 'payload') {
+    lines.push(
+      'Header:',
+      JSON.stringify(entry.header, null, 2),
+      'Payload:',
+      JSON.stringify(entry.payload, null, 2),
+      '',
+      'Selected original fields only; identity values are redacted.',
+      'Omitted fields are not evidence of absence in the original JWT.',
+      'Decoding alone is not signature validation.',
+    );
+  } else {
+    lines.push(
+      JSON.stringify(entry[view], null, 2),
+      '',
+      'Selected original fields only; identity values are redacted.',
+      'Omitted fields are not evidence of absence in the original JWT.',
+      'Decoding alone is not signature validation.',
+    );
+  }
+  return lines.join('\n');
+}
+
 function safeEqual(actual, expected) {
   const a = Buffer.from(actual ?? '');
   const b = Buffer.from(expected);
@@ -556,6 +680,7 @@ class FederatedMcp {
         authorized_party: accessClaims.azp, audience: accessClaims.aud,
         scope: accessClaims.scope, signature_verified: true,
       },
+      token_inspection: inspectKeycloakPair(assertion, accessToken),
       verified_tool_result: allowed.body.result,
       receiver_advertises_idjag_grant_profile: advertised.includes('urn:ietf:params:oauth:grant-profile:id-jag'),
       tests: this.tests,

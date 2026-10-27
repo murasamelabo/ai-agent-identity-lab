@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createOwnedContainer, removeOwnedContainer, UnconfirmedContainerOwnershipError,
 } from './owned-container.mjs';
-import { prepareFederatedMcp } from './federated-mcp.mjs';
+import { inspectKeycloakPair, prepareFederatedMcp } from './federated-mcp.mjs';
 
 const VERSION = '26.8.1';
 const DIGEST = 'sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244';
@@ -44,9 +44,11 @@ const startedAt = new Date().toISOString();
 const cases = [];
 let containerId;
 let resourceServer;
+let validAssertion;
 let accessToken;
 let accessClaims;
 let exchangedAccessClaims;
+let tokenInspection;
 let jwks;
 let linkedUserId;
 let adminToken;
@@ -126,10 +128,12 @@ function assertion({ typ = TYPE, claims = {}, omit = [], key = privateKey } = {}
     iss: EXTERNAL_ISSUER,
     sub: externalSubject,
     aud: ISSUER,
+    client_id: CLIENT,
+    resource: 'lab-api',
+    scope: 'lab.read',
     iat: now,
     exp: now + 120,
     jti: randomUUID(),
-    client_id: CLIENT,
     ...claims,
   };
   for (const name of omit) delete payload[name];
@@ -269,12 +273,14 @@ async function configure() {
 
 async function runTests() {
   const valid = assertion();
+  validAssertion = valid;
   const positive = await grant(valid);
   record('idjag_receiver_accepts_valid_assertion', positive, 200);
   assert.equal(positive.body.refresh_token, undefined, 'JWT grants must not return a refresh token');
   accessToken = positive.body.access_token;
   jwks = (await request(`${ISSUER}/protocol/openid-connect/certs`)).body;
   accessClaims = verifyAccessToken(accessToken);
+  tokenInspection = inspectKeycloakPair(validAssertion, accessToken);
   cases.push({ name: 'issued_access_token_signature_issuer_subject_client_audience_scope', passed: true });
 
   const callerIntrospection = await request(`${ISSUER}/protocol/openid-connect/token/introspect`, {
@@ -505,6 +511,7 @@ try {
       audience: exchangedAccessClaims.aud,
       scope: exchangedAccessClaims.scope,
     },
+    token_inspection: tokenInspection,
     tests: cases,
     passed: cases.every((test) => test.passed),
     limitations: [

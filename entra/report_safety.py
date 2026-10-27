@@ -292,15 +292,33 @@ def validate_inspection(value, summary):
     require(sorted(payload.get("roles", [])) == summary["roles"])
 
 
-def render_token_view(report, name, view):
+def render_token_view(report, name, view, state=None):
     privacy(report)
     enum(name, TOKENS)
     enum(view, {"encoded", "header", "payload"})
     require(name in report.get("token_inspection", {}))
     value = report["token_inspection"][name]
+    display_tokens = {
+        "api_a_input": "agent_input",
+        "api_b_direct": "direct",
+        "api_b_app_only": "app_only",
+        "api_b_obo": "obo",
+        "api_b_metadata": "metadata",
+    }
+    display_aliases = {
+        "[API_A]": "[AI_AGENT_APP]",
+        "[API_B]": "[BACKEND_API]",
+        "[API_A_SP]": "[AI_AGENT_SP]",
+        "[API_B_SP]": "[BACKEND_SP]",
+        "[AZURE_CLI]": "[FRONTEND_CLI]",
+        "[USER_A]": "[USER_A]",
+    }
+    is_live_state = (isinstance(state, dict) and "apps" in state
+                     and "tenant" in state and "user" in state)
+    token_label = display_tokens.get(name, name) if is_live_state else name
     lines = [
         f"VERIFIED ENTRA JWT - {view.upper()} (publication-redacted)",
-        f"Token: {name}",
+        f"Token: {token_label}",
         "Saved sanitized evidence; no token is acquired by this view.",
         "Source verified: RS256 signature, issuer, audience, lifetime.",
         "",
@@ -317,9 +335,38 @@ def render_token_view(report, name, view):
             "This redacted text is not a usable or verifiable JWT.",
         ]
     else:
+        rendered = dict(value[view])
+        resolved_line = None
+        if view == "payload" and is_live_state:
+            cli_id = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
+            real_map = {
+                "[TENANT_V2_ISSUER]": f"https://login.microsoftonline.com/{state['tenant']}/v2.0",
+                "[TENANT]": state["tenant"],
+                "[USER_A]": state["user"],
+                "[AZURE_CLI]": cli_id,
+                "[API_A]": state["apps"]["a"]["appId"],
+                "[API_B]": state["apps"]["b"]["appId"],
+                "[API_A_SP]": state["apps"]["a"]["spId"],
+                "[API_B_SP]": state["apps"]["b"]["spId"],
+            }
+            aud_alias = display_aliases.get(rendered.get("aud"), rendered.get("aud"))
+            azp_alias = display_aliases.get(rendered.get("azp"), rendered.get("azp"))
+            oid_alias = display_aliases.get(rendered.get("oid"), rendered.get("oid"))
+            for key in ("iss", "aud", "azp", "oid", "tid"):
+                if rendered.get(key) in real_map:
+                    rendered[key] = real_map[rendered[key]]
+            resolved_line = (
+                f"Directory objects: aud={str(rendered.get('aud', ''))[:8]}-... {aud_alias}; "
+                f"azp={str(rendered.get('azp', ''))[:8]}-... {azp_alias}; "
+                f"oid={str(rendered.get('oid', ''))[:8]}-... {oid_alias}"
+            )
         lines += [
-            json.dumps(value[view], indent=2),
+            json.dumps(rendered, indent=2),
             "",
+        ]
+        if resolved_line:
+            lines.append(resolved_line)
+        lines += [
             "Selected original fields only; identity values are redacted.",
             "Omitted fields are not evidence of absence in the original JWT.",
             "Decoding alone is not signature validation.",

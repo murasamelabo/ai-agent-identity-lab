@@ -40,6 +40,27 @@ ROLE_NAMES = {
 }
 TOKEN_NAMES = ("api_a_input", "api_b_direct", "api_b_app_only", "api_b_obo",
                "api_b_metadata")
+TOKEN_ALIASES = {
+    "agent_input": "api_a_input",
+    "direct": "api_b_direct",
+    "app_only": "api_b_app_only",
+    "obo": "api_b_obo",
+    "metadata": "api_b_metadata",
+}
+APP_SLUGS = {"a": "ai-agent-app", "b": "backend-api"}
+APP_NAMES = {"a": "AI-Agent-App", "b": "Backend-API"}
+
+
+def app_display_name(prefix, name):
+    return f"{APP_NAMES[name]}-{prefix}"
+
+
+def allowed_app_display_names(prefix, name):
+    return {
+        app_display_name(prefix, name),
+        f"{prefix}-{APP_SLUGS[name]}",
+        f"{prefix}-api-{name}",
+    }
 GUID = re.compile(r"\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b")
 JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 SAFE_CODE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,100}$")
@@ -194,7 +215,7 @@ class PrivateStore:
             self.secure(self.directory)
             self.path = self.directory / "state.json"
             self.data = {
-                "run": run, "prefix": "shoten21-obo-" + run,
+                "run": run, "prefix": "shoten21-obo-" + run[:8],
                 "created_at": now(), "apps": {}, "grants": [], "assignments": [],
             }
             self.save()
@@ -416,7 +437,7 @@ def owned_application(graph, store, name):
     )
     if (actual.get("id") != app["id"] or actual.get("displayName") != app["displayName"]
             or actual.get("appId") != app["appId"]
-            or app["displayName"] != f"{store.data['prefix']}-api-{name}"
+            or app["displayName"] not in allowed_app_display_names(store.data["prefix"], name)
             or app.get("marker") and actual.get("tags") != [app["marker"]]):
         raise Blocked("verify_owned_application", "OwnershipGuardFailed")
     return app
@@ -479,7 +500,7 @@ def validate_intent(store, intent):
     if kind in ("app", "sp"):
         name = intent["name"]
         valid = valid and name in {"a", "b"}
-        valid = valid and body.get("displayName") == f"{state['prefix']}-api-{name}"
+        valid = valid and body.get("displayName") in allowed_app_display_names(state["prefix"], name)
         valid = valid and body.get("tags") == [marker]
         if kind == "app":
             valid = (valid and intent["path"] == "/applications"
@@ -578,10 +599,10 @@ def reconcile_pending(graph, store):
         raise Blocked("reconcile", "MutationOwnershipMismatch")
     body, kind = intent["body"], intent["kind"]
     if kind == "app":
-        expected = f"{store.data['prefix']}-api-{intent['name']}"
-        if body["displayName"] != expected or body.get("tags") != [intent["run_marker"]]:
+        allowed_names = allowed_app_display_names(store.data["prefix"], intent["name"])
+        if body["displayName"] not in allowed_names or body.get("tags") != [intent["run_marker"]]:
             raise Blocked("reconcile", "MutationOwnershipMismatch")
-        escaped = expected.replace("'", "''")
+        escaped = body["displayName"].replace("'", "''")
         candidates = graph.collection(
             f"/applications?$filter=displayName eq '{escaped}'"
             "&$select=id,appId,displayName,tags,signInAudience,api", "reconcile")
@@ -628,7 +649,7 @@ def provision(graph, store, report):
     if store.data["apps"]:
         raise Blocked("provision", "UseResumeForExistingRun")
     for name in ("a", "b"):
-        display = f"{store.data['prefix']}-api-{name}"
+        display = app_display_name(store.data["prefix"], name)
         app = create_recorded(
             graph, store, "app", "/applications", f"create_api_{name}",
             {"displayName": display, "signInAudience": "AzureADMyOrg",
@@ -1100,7 +1121,7 @@ def cleanup(graph, store, report):
             else:
                 if (sp.get("id") != app["spId"] or sp.get("appId") != app["appId"]
                         or sp.get("displayName") != app["displayName"]
-                        or app["displayName"] != f"{state['prefix']}-api-{name}"
+                        or app["displayName"] not in allowed_app_display_names(state["prefix"], name)
                         or app.get("marker") and sp.get("tags") != [app["marker"]]):
                     raise Blocked("verify_created_sp", "ServicePrincipalOwnershipGuardFailed")
                 graph.call("DELETE", f"/servicePrincipals/{app['spId']}", "delete_created_sp")
@@ -1244,27 +1265,30 @@ def audit_resources(graph, store, report):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=("probe", "run", "resume", "audit", "cleanup", "verify-report",
-                            "bind-existing-report", "reconcile", "token-view"))
+        "command", choices=("probe", "prepare", "run", "resume", "audit", "cleanup",
+                            "verify-report", "bind-existing-report", "reconcile", "token-view"))
     parser.add_argument("--run", help="Private run handle; defaults to latest private run")
     parser.add_argument("--view", choices=("encoded", "header", "payload"), default="encoded")
-    parser.add_argument("--token-name", choices=TOKEN_NAMES, default="api_b_obo")
+    parser.add_argument("--token-name", choices=(*TOKEN_NAMES, *TOKEN_ALIASES), default="api_b_obo")
     parser.add_argument("--show-raw-tokens", action="store_true",
                         help="LOCAL CONSOLE ONLY: print newly acquired bearer credentials")
     args = parser.parse_args(argv)
+    args.token_name = TOKEN_ALIASES.get(args.token_name, args.token_name)
     if args.show_raw_tokens and (
             args.command not in ("run", "resume") or not sys.stdout.isatty()):
         parser.error("--show-raw-tokens requires run/resume and an unredirected local console")
     if args.command in ("verify-report", "token-view"):
         checks = {"privacy": False, "evidence_consistency": False,
                   "local_run_integrity": False, "remote_attestation": False}
+        store = None
         try:
             report = json.loads(REPORT.read_text(encoding="utf-8-sig"))
             report_safety.privacy(report)
             checks["privacy"] = True
             report_safety.consistency(report, final=True)
             checks["evidence_consistency"] = True
-            PrivateStore(args.run).verify_report(report)
+            store = PrivateStore(args.run)
+            store.verify_report(report)
             checks["local_run_integrity"] = True
         except (Blocked, OSError, ValueError, KeyError):
             pass
@@ -1273,7 +1297,9 @@ def main(argv=None):
         if args.command == "token-view":
             if verified:
                 try:
-                    print(report_safety.render_token_view(report, args.token_name, args.view))
+                    state = getattr(store, "data", None)
+                    print(report_safety.render_token_view(
+                        report, args.token_name, args.view, state=state))
                     return 0
                 except report_safety.Rejected:
                     pass
@@ -1285,7 +1311,7 @@ def main(argv=None):
     # Verify the previous binding before any rewrite; never auto-reseal a
     # tampered report. Migration is explicit and does not rerun token acquisition.
     try:
-        create = args.command in ("probe", "run")
+        create = args.command in ("probe", "prepare")
         store = PrivateStore(args.run, create=create)
         importing = args.command == "bind-existing-report"
         if create:
@@ -1319,7 +1345,7 @@ def main(argv=None):
                 store.verify_report(report)
             if args.command not in ("audit", "bind-existing-report"):
                 report["blockers"] = []
-            if args.command == "resume":
+            if args.command in ("run", "resume"):
                 store.data["capturing_observations"] = True
                 store.save()
                 report["tokens"] = {}
@@ -1347,15 +1373,19 @@ def main(argv=None):
         elif args.command == "reconcile":
             reconcile_pending(graph, store)
         else:
-            if args.command in ("probe", "run"):
+            if args.command in ("probe", "prepare"):
                 probe(graph, store, report)
             if args.command == "probe":
                 report["status"] = "probe_only"
+            elif args.command == "prepare":
+                provision(graph, store, report)
+                audit_resources(graph, store, report)
+                # Allow normal directory propagation without retrying mutations.
+                time.sleep(15)
+                report["status"] = "provisioned"
             else:
-                if args.command == "run":
-                    provision(graph, store, report)
-                    # Allow normal directory propagation without retrying mutations.
-                    time.sleep(15)
+                if "resource_audit" not in report:
+                    audit_resources(graph, store, report)
                 raw_tokens = acquire_and_compare(
                     store, report, return_raw_tokens=args.show_raw_tokens)
     except Blocked as error:
@@ -1382,7 +1412,7 @@ def main(argv=None):
         "cleanup": report["cleanup"],
     }, indent=2))
     successful_action = (
-        report["status"] in ("succeeded", "probe_only")
+        report["status"] in ("succeeded", "probe_only", "provisioned")
         or args.command in ("cleanup", "audit", "reconcile", "bind-existing-report")
         and not report["blockers"]
     )
