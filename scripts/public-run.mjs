@@ -44,7 +44,6 @@ if (mode === 'TokenView') {
     process.exit(2);
   }
 }
-const brief = process.argv[3] === '--brief';
 const files = {
   Keycloak: 'verified-results.json',
   Federated: 'federated-mcp-results.json',
@@ -159,7 +158,7 @@ try {
     mcp_tools_call_denies_other_synthetic_user_document: 'other_document_denied',
     mcp_rejects_original_entra_token_as_resource_bearer: 'original_token_rejected',
   };
-  const useSelected = brief || mode === 'FederatedRun';
+  const useSelected = mode === 'FederatedRun';
   if (useSelected) assert(Object.keys(selected).every((name) => observed.has(name)));
   console.log(useSelected ? 'Actual process output (selected known checks):' : 'Actual process output (known test names only):');
   for (const name of useSelected ? Object.keys(selected) : observed) {

@@ -13,6 +13,5 @@ diagrams/.archify*
 diagrams/*visual-check*
 diagrams/*browser-evidence*
 artifacts/
-.capture/
 entra/reports/
 keycloak/results/

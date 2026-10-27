@@ -16,12 +16,12 @@ Entra ID の On-Behalf-Of (OBO) と、Keycloak の実験的な ID-JAG 受信機�
 
 前提: スクリプトの実行を許可されたWindows PowerShell 5.1またはPowerShell 7、Node.js 22以上、Linuxコンテナーを使えるDocker Desktop。Python 3.11以上とAzure CLI v2はEntra実験で使います。Docker用ループバックポート **18080** を空けてください。イメージや依存関係の取得、Entraの実験にはインターネット接続が必要です。アプリ登録と同意に必要な権限は自分のテナント管理者と確認してください。組織の実行ポリシーを自動で回避する処理はありません。
 
-書籍の再現用バージョンは `v1.2.2` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションは毎回新しい実験を実行します。画面撮影ではテナント ID を自動で伏せます。既存の `v1.0.0`～`v1.2.1` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
+書籍の再現用バージョンは `v1.3.0` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションは毎回新しい実験を実行します。端末画面を撮影するためのスクリプトはこの版で削除しました。既存の `v1.0.0`～`v1.2.2` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
 
 ```powershell
 git clone https://github.com/murasamelabo/ai-agent-identity-lab.git
 Set-Location ai-agent-identity-lab
-git checkout v1.2.2
+git checkout v1.3.0
 .\scripts\lab.ps1 -Action Setup -SkipPython
 .\scripts\lab.ps1 -Action Doctor
 .\scripts\lab.ps1 -Action Test -SkipPython
@@ -84,7 +84,7 @@ az login --tenant "<検証用テナントID>" --allow-no-subscriptions
 .\scripts\lab.ps1 -Action EntraRun -ShowRawTokens
 ```
 
-検証とレポート保存が成功した場合に限り、その取得で検証した完全なJWTをローカルコンソールへ表示します。保存済みの抜粋から生JWTを復元する機能ではありません。`-Screen`、公開画像用アクション、OS側の標準出力がリダイレクトされた環境では拒否します。生JWTはPowerShellの出力ストリームを経由せず、子Pythonが実際のコンソールへ直接書きます。パイプや変数への代入で取り出すための機能ではありません。Pythonを直接使う場合も `lab.py run --show-raw-tokens`／`resume --show-raw-tokens` は非リダイレクトのコンソールが必要です。この制限だけで画面録画を検知できるわけではありません。
+検証とレポート保存が成功した場合に限り、その取得で検証した完全なJWTをローカルコンソールへ表示します。保存済みの抜粋から生JWTを復元する機能ではありません。OS側の標準出力がリダイレクトされた環境では拒否します。生JWTはPowerShellの出力ストリームを経由せず、子Pythonが実際のコンソールへ直接書きます。パイプや変数への代入で取り出すための機能ではありません。Pythonを直接使う場合も `lab.py run --show-raw-tokens`／`resume --show-raw-tokens` は非リダイレクトのコンソールが必要です。この制限だけで画面録画を検知できるわけではありません。
 
 ### 直接実行
 
@@ -117,41 +117,14 @@ $LabPython = Join-Path (Split-Path $AzFolder -Parent) 'python.exe'
 
 この場合、`EntraAudit`、`EntraVerify`、`Report`、`Cleanup` にも同じ `-Python $LabPython` を付けます。Windows固有の保護ストレージを使うEntra実験はmacOS/Linux非対応です。macOS/LinuxではNode.jsとDockerによるKeycloakの直接実行だけが対象です。
 
-## 実際の端末画面を撮影する
-
-`capture-terminal.ps1` は新しいWindowsネイティブコンソールで実際にコマンドを実行し、そのウィンドウの画素を取得します。HTMLで端末を模した画像を作ったり、古いログを成功したように再生したりしません。実行したコマンドと完了表示が画面に含まれます。
-
-```powershell
-.\scripts\capture-terminal.ps1 -Action Keycloak
-.\scripts\capture-terminal.ps1 -Action Federated
-.\scripts\capture-terminal.ps1 -Action Report
-# 別のPythonを使う場合
-.\scripts\capture-terminal.ps1 -Action Report -Python $LabPython
-# 取得済みJWTのマスク済み表示だけを撮影
-.\scripts\capture-terminal.ps1 -Action TokenEncoded -TokenName api_b_obo -Python $LabPython
-.\scripts\capture-terminal.ps1 -Action TokenHeader -TokenName api_b_obo -Python $LabPython
-.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_obo -Python $LabPython
-.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_app_only -Python $LabPython
-.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName api_b_direct -Python $LabPython
-.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName idjag
-.\scripts\capture-terminal.ps1 -Action TokenPayload -TokenName keycloak_access_token
-```
-
-`Keycloak` と `Federated` はこの撮影でも実際に再実行されます。`Report` は取得済みの実測結果を検証して表示する操作で、新たなトークン取得ではありません。対話可能なWindowsデスクトップが必要です。画像は既定で `artifacts/screenshots/` に保存し、書籍用には `-OutputDirectory` で指定します。
-`TokenEncoded`／`TokenHeader`／`TokenPayload` も取得済みのマスク済み実測を表示します。ファイル名にはトークン名を含め、3種類のペイロードを上書きせず撮影できます。キャプチャには生JWTを表示するオプションはありません。
-
-実際の診断出力はメモリー内で受け取り、許可した検査名・応答・別名だけを端末へ出します。未知の出力、コマンド失敗、所有者を確認できないウィンドウ、空の画像では成功画像を保存しません。撮影後は、完了表示、可読性、伏字を目視で確認してください。`docs/screenshots/` は著者が実際に撮影した画面です。
-JWTの掲載画像は可読性のため、撮影した画素からウィンドウ枠と空白の余白だけを切り取っています。文字の再描画や結果の差し替えはしていません。新しい実測のマスク済みJSONは [examples/author-run/jwt-inspection-comparison.json](examples/author-run/jwt-inspection-comparison.json) です。
-撮影時は読みやすいように主な8件を短い検査名で表示します。36件すべての成否を検証した上での抜粋であり、未表示の検査を省略実行するわけではありません。
-
-`-TimeoutSeconds` は画像の採用期限です。期限を超えても検証処理を強制終了せず、コンテナーなどの片付けが完了するまで待って画像を不採用にします。途中で強制停止した場合は、個別の復旧手順に従って所有する検証資材だけを確認してください。
+## コンテナーの所有確認に失敗した場合
 
 Dockerによる作成後に所有確認ができなかった場合、公開用ランチャーは生の診断を表示せず、完全なコンテナーIDと期待する所有nonceだけを `artifacts/recovery/` に残します。ここはGit管理対象外です。記録を非公開で確認し、実際のラベルとIDが一致するまで削除しないでください。未知のコンテナーを自動で引き取る機能ではありません。
 
-### 著者の実際の端末画面
+## 著者の実際の端末画面
 
-以下は、このリポジトリのコマンドを実行したネイティブコンソールの撮影結果です。
-Reportは取得済みのEntra実測の検証・表示、残り二つは撮影時に実験を再実行しています。
+以下は、このリポジトリのコマンドを著者が実行した端末の画面です。
+Reportは取得済みのEntra実測の検証・表示、残り二つは実験を実行した画面です。KeycloakとFederatedの画面は主な検査だけを表示した時点のもので、現在の `lab.ps1` では検証したすべての検査名を表示します。
 読者の実行結果ではありません。
 
 ![実際のReport実行画面](docs/screenshots/terminal-report.png)

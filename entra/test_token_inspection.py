@@ -3,9 +3,6 @@
 import copy
 import io
 import json
-import os
-from pathlib import Path
-import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -95,50 +92,6 @@ class InspectionSchemaTests(unittest.TestCase):
         report["token_inspection"]["api_b_obo"]["payload"]["email"] = "private"
         with self.assertRaises(safety.Rejected):
             safety.render_token_view(report, "api_b_obo", "payload")
-
-    @unittest.skipUnless(os.name == "nt", "Native capture uses Windows PowerShell")
-    def test_native_allowlist_accepts_all_views_but_rejects_credentials(self):
-        report = inspected_report()
-        accepted = []
-        for name in report["tokens"]:
-            for view in ("encoded", "header", "payload"):
-                accepted.extend(safety.render_token_view(report, name, view).splitlines())
-        data = {
-            "path": str(Path(__file__).resolve().parent.parent / "scripts" / "terminal-worker.ps1"),
-            "accepted": accepted,
-            "rejected": ['  "oid": "private-user",', '  "email": "private@example.test",',
-                         '  "kid": "private-key",', "eyJprivate.payload.signature"],
-        }
-        script = r"""
-$ErrorActionPreference = 'Stop'
-$data = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$tokens = $null; $errors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile($data.path, [ref]$tokens, [ref]$errors)
-if ($errors.Count) { throw 'Worker parser failure' }
-$assignment = $ast.Find({ param($node)
-    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
-    $node.Left.Extent.Text -eq '$allowed'
-}, $true)
-$patterns = @($assignment.Right.FindAll({ param($node)
-    $node -is [Management.Automation.Language.StringConstantExpressionAst]
-}, $true) | ForEach-Object { $_.Value })
-if ($patterns.Count -lt 20) { throw 'Worker allowlist missing' }
-foreach ($pattern in $patterns) { $null = [regex]::new($pattern) }
-foreach ($line in $data.accepted) {
-    if (-not ($patterns | Where-Object { $line -cmatch $_ })) {
-        throw 'Sanitized line rejected by native worker'
-    }
-}
-foreach ($line in $data.rejected) {
-    if ($patterns | Where-Object { $line -cmatch $_ }) {
-        throw 'Sensitive line accepted by native worker'
-    }
-}
-"""
-        shell = Path(os.environ["WINDIR"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-        result = subprocess.run([str(shell), "-NoProfile", "-Command", script],
-                                input=json.dumps(data), capture_output=True, text=True, timeout=60)
-        self.assertEqual(result.returncode, 0, "Native worker allowlist contract failed")
 
 
 class InspectionProductionTests(unittest.TestCase):

@@ -10,8 +10,6 @@ param(
 
     [switch]$SkipPython,
 
-    [switch]$Screen,
-
     [ValidateSet('app_only', 'direct', 'obo', 'agent_input', 'metadata',
         'api_a_input', 'api_b_direct', 'api_b_app_only', 'api_b_client_credentials',
         'api_b_obo', 'api_b_metadata', 'idjag', 'keycloak_access_token')]
@@ -25,9 +23,9 @@ Set-StrictMode -Version Latest
 $root = Split-Path -Parent $PSScriptRoot
 $venvPython = Join-Path $root '.venv\Scripts\python.exe'
 $azCliPython = 'C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe'
-if ($ShowRawTokens -and ($Screen -or $Action -notin @('EntraRun', 'EntraResume') -or
+if ($ShowRawTokens -and ($Action -notin @('EntraRun', 'EntraResume') -or
         [Console]::IsOutputRedirected)) {
-    throw 'Raw tokens require EntraRun/EntraResume in an unredirected local console, never Screen.'
+    throw 'Raw tokens require EntraRun/EntraResume in an unredirected local console.'
 }
 if ($PSBoundParameters.ContainsKey('TokenName') -and $Action -notlike 'Token*') {
     throw 'TokenName is supported only for TokenEncoded, TokenHeader and TokenPayload.'
@@ -185,7 +183,7 @@ function Write-EntraTokenComparison {
         $values = @($token.aud, $token.azp, $token.oid, ($token.scp -join ' '), ($token.roles -join ' '))
         if ($token.signature_issuer_audience_lifetime -ne 'verified' -or
             ($values -join '|') -ne ($expected[$name] -join '|')) {
-            throw 'Unexpected or unmasked token context; screenshot output refused.'
+            throw 'Unexpected or unmasked token context; output refused.'
         }
         $audCell = ($guidMap[$token.aud].Substring(0, 8) + '-... ' + $aliasDisplay[$token.aud])
         $azpCell = ($guidMap[$token.azp].Substring(0, 8) + '-... ' + $aliasDisplay[$token.azp])
@@ -195,7 +193,7 @@ function Write-EntraTokenComparison {
     }
     $cases = @($data.experiments)
     if ($cases.Count -ne 9 -or @($cases | Where-Object { -not $_.passed -or $_.actual -ne $_.expected }).Count) {
-        throw 'Authorization checks are incomplete; screenshot output refused.'
+        throw 'Authorization checks are incomplete; output refused.'
     }
     Write-Output ''
     Write-Output 'EntraRun completed: 3 Backend API tokens acquired and verified.'
@@ -206,7 +204,7 @@ function Write-EntraAuthzChecks {
     $data = $ctx.Report
     $cases = @($data.experiments)
     if ($cases.Count -ne 9 -or @($cases | Where-Object { -not $_.passed -or $_.actual -ne $_.expected }).Count) {
-        throw 'Authorization checks are incomplete; screenshot output refused.'
+        throw 'Authorization checks are incomplete; output refused.'
     }
     $meta = @{
         api_b_direct_alice = @('direct_alice', 'direct', 'alice (Docs.Read)')
@@ -316,7 +314,6 @@ try {
         }
         { $_ -in @('Keycloak', 'Federated', 'FederatedPrepare', 'FederatedRun') } {
             $arguments = @((Join-Path $PSScriptRoot 'public-run.mjs'), $Action)
-            if ($Screen) { $arguments += '--brief' }
             Invoke-Checked -Executable 'node' -Arguments $arguments
             if ($Action -ne 'FederatedPrepare') {
                 Write-Output 'Execution completed; owned local services were closed.'
@@ -342,12 +339,7 @@ try {
             $runtime = Get-LabPython
             Push-Location -LiteralPath (Join-Path $root 'entra')
             try {
-                $pyCommand = if ($Screen -and $Action -in @('EntraPrepare', 'EntraRun', 'EntraAuthz', 'Report')) {
-                    'verify-report'
-                } else {
-                    $commands[$Action]
-                }
-                $arguments = @('-X', 'utf8', '-B', 'lab.py', $pyCommand)
+                $arguments = @('-X', 'utf8', '-B', 'lab.py', $commands[$Action])
                 if ($Action -like 'Token*') {
                     $arguments += @('--view', $Action.Substring(5).ToLowerInvariant(),
                         '--token-name', $TokenName)
