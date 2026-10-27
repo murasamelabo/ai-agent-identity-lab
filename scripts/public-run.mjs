@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderKeycloakTokenView } from '../keycloak/federated-mcp.mjs';
+import { renderKeycloakTokenView, selectLatestTokenReport } from '../keycloak/federated-mcp.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.argv[2];
@@ -17,7 +17,7 @@ if (mode === 'TokenView') {
       ['federated-mcp-results.json', true],
       ['verified-results.json', false],
     ];
-    let matchedReport = null;
+    const verifiedReports = [];
     for (const [file, isFederated] of candidates) {
       const candidatePath = join(root, 'keycloak', 'results', file);
       try {
@@ -27,15 +27,14 @@ if (mode === 'TokenView') {
         if (report.passed === true && report.cleanup?.removed === true &&
             (!isFederated || report.cleanup?.local_servers_closed === true) &&
             report.tests?.length === expected.size &&
-            report.tests.every((t) => t.passed === true && expected.has(t.name)) &&
-            report.token_inspection?.[tokenName]) {
-          matchedReport = report;
-          break;
+            report.tests.every((t) => t.passed === true && expected.has(t.name))) {
+          verifiedReports.push(report);
         }
       } catch {
         // Try next candidate
       }
     }
+    const matchedReport = selectLatestTokenReport(verifiedReports, tokenName);
     assert(matchedReport, 'No verified token inspection report available');
     console.log(renderKeycloakTokenView(matchedReport, tokenName, view));
     process.exit(0);
@@ -80,26 +79,13 @@ function isVerifiedReport(candidate) {
 }
 
 let existingReport = null;
-if (mode === 'FederatedPrepare' || mode === 'FederatedRun') {
-  try {
-    const candidate = read(reportPath);
-    if (isVerifiedReport(candidate)) {
-      existingReport = candidate;
-    }
-  } catch {
-    existingReport = null;
-  }
-}
-
 let observed = new Set();
-if (!existingReport) {
+{
   rmSync(reportPath, { force: true });
   const started = Date.now();
   const args = [join(root, 'keycloak', 'run.mjs')];
   if (isFederatedMode) args.push('--federated-mcp');
-  if (mode !== 'FederatedPrepare') {
-    console.log(`Executing real ${mode} experiment. Raw diagnostics stay private.`);
-  }
+  console.log(`Executing real ${mode} experiment. Raw diagnostics stay private.`);
   const result = spawnSync(process.execPath, args, {
     cwd: join(root, 'keycloak'), encoding: 'utf8', windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
@@ -134,16 +120,14 @@ if (!existingReport) {
   }
   assert(observed.size > 20, 'Expected actual live PASS lines, not just a saved report.');
   existingReport = report;
-} else {
-  observed = new Set(existingReport.tests.map((test) => test.name));
 }
 
 try {
   const report = existingReport;
   if (mode === 'FederatedPrepare') {
     const ep = report.endpoints;
-    console.log('PREPARED KEYCLOAK ID-JAG RECEIVER & LOCAL MCP ENVIRONMENT');
-    console.log('Component         Endpoint / Identifier                            Configuration');
+    console.log('COMPLETED FEDERATED EXPERIMENT: CONFIGURATION USED IN THIS RUN');
+    console.log('Component         Endpoint / Identifier                            Configuration verified');
     console.log(`[ENTRA_IDP]       ${'<ENTRA_TENANT_ISSUER>'.padEnd(48)} Sign-in IdP (input token verified)`);
     console.log(`[CUSTOM_ISSUER]   ${String(ep.custom_broker_issuer).padEnd(48)} Issues oauth-id-jag+jwt (RFC 8693)`);
     console.log(`[KEYCLOAK_RCV]    ${String(ep.keycloak_receiver).padEnd(48)} Trusts custom-idjag-issuer RSA key`);
@@ -151,7 +135,7 @@ try {
     console.log(`[MCP_CLIENT]      ${'mcp-ema-client'.padEnd(48)} JWT authorization grant enabled`);
     console.log(`[MCP_SERVER]      ${String(ep.mcp_resource).padEnd(48)} Protected resource (scope: mcp.read)`);
     console.log('');
-    console.log('FederatedPrepare completed: Keycloak receiver realm, issuer trust, user link, and MCP server are ready.');
+    console.log('FederatedPrepare completed: receiver realm, issuer trust, user link, and MCP server were configured and verified; owned services are now closed.');
     process.exit(0);
   }
   const selected = mode === 'Keycloak' ? {

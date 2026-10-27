@@ -2,7 +2,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
 import {
-  inspectKeycloakPair, renderKeycloakTokenView, verifySignedJwt,
+  inspectKeycloakPair, renderKeycloakTokenView, selectLatestTokenReport, verifySignedJwt,
 } from './federated-mcp.mjs';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -17,6 +17,15 @@ function token(claims = {}, header = {}) {
   })}`;
   return `${data}.${sign('RSA-SHA256', Buffer.from(data), privateKey).toString('base64url')}`;
 }
+
+test('token view selects the most recently started verified experiment', () => {
+  const keycloak = { name: 'keycloak', started_at: '2026-10-25T11:59:42Z', token_inspection: { idjag: {} } };
+  const federated = { name: 'federated', started_at: '2026-10-18T23:33:38Z', token_inspection: { idjag: {} } };
+  assert.equal(selectLatestTokenReport([federated, keycloak], 'idjag'), keycloak);
+  assert.equal(selectLatestTokenReport([keycloak, { ...federated, started_at: '2026-10-26T00:00:00Z' }], 'idjag').name, 'federated');
+  assert.equal(selectLatestTokenReport([keycloak, federated], 'keycloak_access_token'), null);
+  assert.equal(selectLatestTokenReport([{ ...keycloak, started_at: 'invalid' }], 'idjag'), null);
+});
 
 test('signed JWT verifier accepts the exact trusted signature, issuer, audience and time', () => {
   assert.equal(verifySignedJwt(token(), jwks, ISSUER, AUDIENCE).claims.aud, AUDIENCE);

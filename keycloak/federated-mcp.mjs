@@ -178,6 +178,16 @@ export function inspectKeycloakPair(idjagJwt, accessJwt) {
   };
 }
 
+export function selectLatestTokenReport(reports, name) {
+  let latest = null;
+  for (const report of reports) {
+    const started = Date.parse(report?.started_at);
+    if (!report?.token_inspection?.[name] || !Number.isFinite(started)) continue;
+    if (!latest || started > Date.parse(latest.started_at)) latest = report;
+  }
+  return latest;
+}
+
 export function renderKeycloakTokenView(report, name, view) {
   requireValue(report?.passed === true, 'InvalidKeycloakReport');
   requireValue(['idjag', 'keycloak_access_token'].includes(name), 'InvalidTokenName');

@@ -16,12 +16,12 @@ Entra ID の On-Behalf-Of (OBO) と、Keycloak の実験的な ID-JAG 受信機�
 
 前提: スクリプトの実行を許可されたWindows PowerShell 5.1またはPowerShell 7、Node.js 22以上、Linuxコンテナーを使えるDocker Desktop。Python 3.11以上とAzure CLI v2はEntra実験で使います。Docker用ループバックポート **18080** を空けてください。イメージや依存関係の取得、Entraの実験にはインターネット接続が必要です。アプリ登録と同意に必要な権限は自分のテナント管理者と確認してください。組織の実行ポリシーを自動で回避する処理はありません。
 
-書籍の再現用バージョンは `v1.2.0` です。準備と実行を分けた段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を追加した版です。既存の `v1.0.0` と `v1.1.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
+書籍の再現用バージョンは `v1.2.1` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションが毎回新しい実験を実行するように修正した版です。既存の `v1.0.0`、`v1.1.0`、`v1.2.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
 
 ```powershell
 git clone https://github.com/murasamelabo/ai-agent-identity-lab.git
 Set-Location ai-agent-identity-lab
-git checkout v1.2.0
+git checkout v1.2.1
 .\scripts\lab.ps1 -Action Setup -SkipPython
 .\scripts\lab.ps1 -Action Doctor
 .\scripts\lab.ps1 -Action Test -SkipPython
@@ -45,7 +45,7 @@ az login --tenant "<検証用テナントID>" --allow-no-subscriptions
 .\scripts\lab.ps1 -Action Cleanup
 ```
 
-`EntraPrepare` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraRun` は `EntraPrepare` で準備した構成を使って 3 種類のトークンを取得・比較し、`EntraAuthz` は取得したトークンに対するローカルの認可判定を表示します。`FederatedPrepare` と `FederatedRun` は、Keycloak（Receiver）と独自 Issuer、MCP サーバーを準備して ID-JAG の交換から MCP 呼び出しまでを実行します。**すべての Federated 実行が終わってから Cleanup** を行います。
+`EntraPrepare` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraRun` は `EntraPrepare` で準備した構成を使って 3 種類のトークンを取得・比較し、`EntraAuthz` は取得したトークンに対するローカルの認可判定を表示します。`FederatedPrepare` と `FederatedRun` は、どちらも Keycloak（Receiver）と独自 Issuer、MCP サーバーを一時的に起動して、ID-JAG の交換から MCP 呼び出しまでの実験を毎回新しく実行し、終了時に一時サービスを停止します。保存済みの結果を今回の実行として表示することはありません。`FederatedPrepare` は完了した実験で使った構成(信頼関係、ユーザーの対応付け、MCP サーバー)を、`FederatedRun` は交換と呼び出しの結果を表示します。**すべての Federated 実行が終わってから Cleanup** を行います。
 
 `Report` は同じ実行の保護されたローカル状態で検証してから、マスク済みの実トークン比較を端末へ出力します。`examples/author-run/` は著者の過去の実行例であり、読者の実行結果ではありません。自分の出力先 `entra/reports/` と `keycloak/results/` はGitで無視します。レポートの伏字化やローカル整合性検証は、第三者による認証や安全性の証明ではありません。共有前に人間が内容を確認してください。
 
@@ -61,7 +61,7 @@ az login --tenant "<検証用テナントID>" --allow-no-subscriptions
 .\scripts\lab.ps1 -Action TokenPayload -TokenName app_only
 .\scripts\lab.ps1 -Action TokenPayload -TokenName direct
 .\scripts\lab.ps1 -Action TokenPayload -TokenName obo
-# Keycloak単独検証の後でID-JAGと交換後アクセストークンを比較する場合
+# 直近に成功した Keycloak または Federated の実行で、ID-JAGと交換後アクセストークンを比較する場合
 .\scripts\lab.ps1 -Action TokenPayload -TokenName idjag
 .\scripts\lab.ps1 -Action TokenPayload -TokenName keycloak_access_token
 ```
