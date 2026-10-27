@@ -54,14 +54,24 @@ if ($Action -like 'Token*') { $arguments += @('-TokenName', $TokenName) }
 $process = $null
 $workerProcess = $null
 $workerStarted = $null
+$abandoned = $false
 try {
     $process = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\conhost.exe') `
         -ArgumentList $arguments -WorkingDirectory $root -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $cleanupDeadline = $deadline.AddSeconds(120)
     $deadlineExceeded = $false
     while (-not (Test-Path -LiteralPath $completion)) {
         if ($process.HasExited) { throw 'The native console exited before completion.' }
-        if ([DateTime]::UtcNow -ge $deadline) { $deadlineExceeded = $true }
+        $now = [DateTime]::UtcNow
+        if ($now -ge $deadline) { $deadlineExceeded = $true }
+        if ($now -ge $cleanupDeadline) {
+            # Killing a stalled run could orphan owned containers or Entra objects.
+            $abandoned = $true
+            throw ('Capture timed out and the command did not finish within the 120-second cleanup grace period. ' +
+                'The owned console (PID ' + $process.Id + ') was left running so the command can finish its own cleanup. ' +
+                'After it exits, check for owned containers and run lab.ps1 -Action Cleanup if Entra objects remain.')
+        }
         Start-Sleep -Milliseconds 200
     }
     $metadata = Get-Content -LiteralPath $completion -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -138,14 +148,18 @@ try {
         $image.Dispose()
     }
 } finally {
-    if ($workerProcess -and -not $workerProcess.HasExited -and $workerProcess.StartTime -eq $workerStarted) {
-        Stop-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue
-    } elseif ($process -and -not $process.HasExited) {
-        $children = @(Get-CimInstance Win32_Process -Filter ('ParentProcessId = ' + $process.Id) |
-            Where-Object { $_.Name -in @('powershell.exe', 'pwsh.exe') -and $_.CommandLine -like ('*' + $completion + '*') })
-        foreach ($child in $children) { Stop-Process -Id $child.ProcessId -ErrorAction SilentlyContinue }
+    if ($abandoned) {
+        Write-Warning ('Left owned console PID ' + $process.Id + ' running; temporary folder kept at ' + $temporary + '.')
+    } else {
+        if ($workerProcess -and -not $workerProcess.HasExited -and $workerProcess.StartTime -eq $workerStarted) {
+            Stop-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue
+        } elseif ($process -and -not $process.HasExited) {
+            $children = @(Get-CimInstance Win32_Process -Filter ('ParentProcessId = ' + $process.Id) |
+                Where-Object { $_.Name -in @('powershell.exe', 'pwsh.exe') -and $_.CommandLine -like ('*' + $completion + '*') })
+            foreach ($child in $children) { Stop-Process -Id $child.ProcessId -ErrorAction SilentlyContinue }
+        }
+        if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $completion) { Remove-Item -LiteralPath $completion -Force }
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
     }
-    if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
-    if (Test-Path -LiteralPath $completion) { Remove-Item -LiteralPath $completion -Force }
-    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
 }

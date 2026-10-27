@@ -64,6 +64,21 @@ try {
     if ($Python) { $arguments.Python = $Python }
     if ($Action -like 'Token*') { $arguments.TokenName = $TokenName }
     $output = @(& (Join-Path $PSScriptRoot 'lab.ps1') @arguments 2>&1)
+    # Tenant IDs are never shown in captures; other test-tenant object IDs may be.
+    $guid = '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'
+    $tenantIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $output) {
+        foreach ($pattern in @("tenant=($guid)", "login\.microsoftonline\.com/($guid)/", ('"tid": "(' + $guid + ')"'))) {
+            foreach ($match in [regex]::Matches([string]$entry, $pattern)) { $null = $tenantIds.Add($match.Groups[1].Value) }
+        }
+    }
+    if ($tenantIds.Count -gt 0) {
+        $output = @($output | ForEach-Object {
+            $text = [string]$_
+            foreach ($id in $tenantIds) { $text = $text -replace [regex]::Escape($id), '[TENANT_ID]' }
+            $text
+        })
+    }
     $allowed = @(
         '^$', '^v?\d+\.\d+\.\d+$', '^Azure CLI session: Enabled; userType=(user|servicePrincipal)$',
         '^Doctor checked local tools/session only\. It does not prove Entra app-management or consent permissions\.$',
@@ -80,7 +95,7 @@ try {
         '^CUSTOM broker prototype, not native Entra ID-JAG or stable EMA conformance\.$',
         '^Execution completed; owned local services were closed\.$', '^[{}]$',
         '^\s*"(privacy|evidence_consistency|local_run_integrity|remote_attestation)": (true|false),?$',
-        '^REGISTERED ENTRA OBJECTS \(tenant=[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}; prefix=shoten21-obo-[0-9a-f]{8,32}\)$',
+        '^REGISTERED ENTRA OBJECTS \(tenant=\[TENANT_ID\]; prefix=shoten21-obo-[0-9a-f]{8,32}\)$',
         '^Alias\s+Object\s+AppId \(client_id / aud / azp\)\s+ObjectId \(app id / sp oid / user oid\)$',
         '^\[(AI_AGENT_APP|AI_AGENT_SP|BACKEND_API|FRONTEND_CLI|API_A|API_A_SP|API_B|AZURE_CLI)\]\s+(AI-Agent-App \(App reg\)|AI-Agent-App \(Enterprise SP\)|Backend-API \(App reg\)|ai-agent-app \(App reg\)|ai-agent-app \(Enterprise SP\)|backend-api \(App reg\)|Frontend App \(Azure CLI\)|api-a \(App reg\)|api-a \(Enterprise SP\)|api-b \(App reg\)|Azure CLI)\s+[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\s+[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$',
         '^\[USER_A\]\s+Signed-in user\s+\(delegated user subject\)\s+[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$',
@@ -112,8 +127,9 @@ try {
         '^\s*"(kid|x5t|sub|jti)": "\[REDACTED\]",?$',
         '^\s*"sub": "(synthetic-external-user|\[MAPPED_ENTRA_USER\]|\[LINKED_LOCAL_USER\])",?$',
         '^\s*"(iss|aud|azp|oid|tid)": "\[(TENANT_V2_ISSUER|AI_AGENT_APP|BACKEND_API|FRONTEND_CLI|AI_AGENT_SP|BACKEND_SP|API_A|API_B|AZURE_CLI|API_A_SP|API_B_SP|USER_A|TENANT|OTHER_ACTOR)\]",?$',
-        '^\s*"iss": "https://login\.microsoftonline\.com/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/v2\.0",?$',
-        '^\s*"(aud|azp|oid|tid)": "[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}",?$',
+        '^\s*"iss": "https://login\.microsoftonline\.com/\[TENANT_ID\]/v2\.0",?$',
+        '^\s*"tid": "\[TENANT_ID\]",?$',
+        '^\s*"(aud|azp|oid)": "[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}",?$',
         '^Directory objects: aud=[0-9a-f]{8}-\.\.\. \[(BACKEND_API|AI_AGENT_APP|API_A|API_B)\]; azp=[0-9a-f]{8}-\.\.\. \[(AI_AGENT_APP|FRONTEND_CLI|API_A|AZURE_CLI)\]; oid=[0-9a-f]{8}-\.\.\. \[(USER_A|AI_AGENT_SP|API_A_SP)\]$',
         '^\s*"iss": "http://127\.0\.0\.1:(18080/(custom-issuer|realms/idjag-receiver-lab)|\d{2,5})",?$',
         '^\s*"aud": "http://127\.0\.0\.1:(18080/realms/idjag-receiver-lab|\d{2,5}/mcp)",?$',

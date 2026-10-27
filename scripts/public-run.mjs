@@ -27,6 +27,7 @@ if (mode === 'TokenView') {
         if (report.passed === true && report.cleanup?.removed === true &&
             (!isFederated || report.cleanup?.local_servers_closed === true) &&
             report.tests?.length === expected.size &&
+            new Set(report.tests.map((t) => t.name)).size === expected.size &&
             report.tests.every((t) => t.passed === true && expected.has(t.name))) {
           verifiedReports.push(report);
         }
