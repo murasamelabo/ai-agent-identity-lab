@@ -188,8 +188,14 @@ export function selectLatestTokenReport(reports, name) {
   return latest;
 }
 
+const BEARER_CHECK_LABELS = {
+  'shoten.keycloak-idjag-receiver-results.v1': 'Direct API Bearer check (GET /resource)',
+  'shoten.entra-custom-broker-keycloak-mcp-results.v1': 'MCP server Bearer check (POST /mcp)',
+};
+
 export function renderKeycloakTokenView(report, name, view) {
   requireValue(report?.passed === true, 'InvalidKeycloakReport');
+  requireValue(Object.hasOwn(BEARER_CHECK_LABELS, report?.schema), 'UnknownReportSchema');
   requireValue(['idjag', 'keycloak_access_token'].includes(name), 'InvalidTokenName');
   requireValue(['encoded', 'header', 'payload'].includes(view), 'InvalidTokenView');
   const entry = report?.token_inspection?.[name];
@@ -206,7 +212,7 @@ export function renderKeycloakTokenView(report, name, view) {
     `Token: ${name} (role=${entry.role}; header.typ=${entry.header.typ})`,
     'Saved sanitized evidence; no token is acquired by this view.',
     'Source verified: RS256 signature, issuer, audience, lifetime.',
-    `Direct API Bearer check (GET /resource): ${entry.direct_api_bearer_result}`,
+    `${BEARER_CHECK_LABELS[report.schema]}: ${entry.direct_api_bearer_result}`,
     '',
   ];
   if (view === 'encoded') {

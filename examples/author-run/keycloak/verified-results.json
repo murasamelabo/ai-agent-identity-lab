@@ -1,9 +1,9 @@
 ﻿{
   "schema": "shoten.keycloak-idjag-receiver-results.v1",
-  "started_at": "2026-10-25T11:58:50.333Z",
-  "completed_at": "2026-10-25T11:59:20.462Z",
+  "started_at": "2026-10-31T06:19:57.963Z",
+  "completed_at": "2026-10-31T06:20:59.521Z",
   "runtime": {
-    "node": "v24.22.1",
+    "node": "v26.13.0",
     "keycloak": "26.8.1",
     "image_digest": "sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244"
   },
@@ -32,7 +32,7 @@
       "lab-api",
       "account"
     ],
-    "scope": "email lab.read profile"
+    "scope": "profile email lab.read"
   },
   "verified_exchanged_access_token_context": {
     "signature_verified_with_receiver_jwks": true,
@@ -44,7 +44,7 @@
       "lab-api",
       "account"
     ],
-    "scope": "email lab.read profile"
+    "scope": "profile email lab.read"
   },
   "token_inspection": {
     "idjag": {
@@ -69,8 +69,8 @@
         "resource": "lab-api",
         "scope": "lab.read",
         "jti": "[REDACTED]",
-        "iat": 1792929559,
-        "exp": 1792929679
+        "iat": 1793427650,
+        "exp": 1793427770
       }
     },
     "keycloak_access_token": {
@@ -96,10 +96,10 @@
         ],
         "azp": "receiver-client",
         "typ": "Bearer",
-        "scope": "email lab.read profile",
+        "scope": "profile email lab.read",
         "jti": "[REDACTED]",
-        "iat": 1792929560,
-        "exp": 1792929679
+        "iat": 1793427650,
+        "exp": 1793427770
       }
     }
   },
@@ -116,6 +116,10 @@
       "name": "idjag_receiver_accepts_valid_assertion",
       "passed": true,
       "http_status": 200
+    },
+    {
+      "name": "idjag_exchange_returns_no_refresh_token",
+      "passed": true
     },
     {
       "name": "issued_access_token_signature_issuer_subject_client_audience_scope",
@@ -242,6 +246,33 @@
       "oauth_error": "invalid_grant"
     },
     {
+      "name": "idjag_missing_client_authentication_rejected",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "unauthorized_client"
+    },
+    {
+      "name": "idjag_public_client_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_confidential_control_client_accepted",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "idjag_unlinked_subject_with_matching_email_rejected",
+      "passed": true,
+      "http_status": 400,
+      "oauth_error": "invalid_grant"
+    },
+    {
+      "name": "idjag_unlinked_subject_creates_no_user",
+      "passed": true
+    },
+    {
       "name": "rfc7523_plain_jwt_without_client_id_accepted",
       "passed": true,
       "http_status": 200
@@ -304,6 +335,17 @@
       "oauth_error": "invalid_token"
     },
     {
+      "name": "short_lived_access_token_accepted_before_expiry",
+      "passed": true,
+      "http_status": 200
+    },
+    {
+      "name": "short_lived_access_token_rejected_after_expiry",
+      "passed": true,
+      "http_status": 401,
+      "oauth_error": "invalid_token"
+    },
+    {
       "name": "resource_audience_validation_rejects_another_api",
       "passed": true
     }
@@ -313,6 +355,7 @@
     "Experimental Keycloak ID-JAG receiver based on its documented draft-01; not a conformance certification.",
     "Custom signer creates synthetic fixtures, not an enterprise IdP or native Keycloak ID-JAG issuer.",
     "RFC 7523 is separately accepted; unrecognized typ dispatches to generic validation.",
+    "Observed error codes are those of Keycloak 26.8.1 and can differ from the profile in later ID-JAG drafts, for example invalid_grant for a public client or an unlinked subject.",
     "The configured maxAllowedAssertionExpiration limits iat age and replay-cache lifespan, not exp minus iat. Main fixtures expire in 120 seconds, below the configured 180 seconds.",
     "No OIDC authorization-code login, ID-token-to-ID-JAG exchange, MCP protocol, or full MCP EMA flow.",
     "Resource is a minimal HTTP JWT verifier, not an MCP server.",
@@ -320,8 +363,8 @@
     "Single-node replay tests do not certify cluster, restart, or concurrent replay behavior."
   ],
   "cleanup": {
-    "container_name": "shoten-idjag-29a32565-b0ac-4ca8-916a-e9ad5ff22757",
-    "container_id": "9691425d186486341ba94a1791036ece085c81fda04faf83bc27b57b4de8f794",
+    "container_name": "shoten-idjag-c334da0a-591b-479f-af54-10f23f88d26b",
+    "container_id": "696b32b0545492bd456ccff10a682f8e46c7d66f3b8d946c20d1426ed8cf45bc",
     "removed": true,
     "local_servers_closed": true,
     "services_left_running": false

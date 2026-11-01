@@ -27,7 +27,7 @@ npm run check --prefix keycloak
 npm run test:unit --prefix keycloak
 ```
 
-Pythonオフライン65件、Nodeオフライン10件は実テナントでの成功を示さない。Node側はnpm依存なし。必要なアクションだけを `.\scripts\lab.ps1 -Action Test` の形で選ぶ。EntraRunとFederatedを終えてからCleanupを行う。CIは認証情報なしのオフライン検査に限定する。
+Pythonオフライン64件、Nodeオフライン12件は実テナントでの成功を示さない。Node側はnpm依存なし。必要なアクションだけを `.\scripts\lab.ps1 -Action Test` の形で選ぶ。EntraRunとFederatedを終えてからCleanupを行う。CIは認証情報なしのオフライン検査に限定する。
 
 ## 禁止・要注意
 

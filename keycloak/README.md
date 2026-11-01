@@ -124,7 +124,9 @@ dashboard; it contains the exact local receiver endpoint and sanitized outcomes.
    `oauth2.jwt.authorization.grant.enabled=true` and
    `oauth2.jwt.authorization.grant.idp=custom-idjag-issuer`.
 4. Keycloak links the external subject to a pre-created local synthetic user.
-   This lab tests an existing mapping, not automatic just-in-time provisioning.
+   This lab tests an existing mapping, not automatic just-in-time provisioning:
+   an unlinked `sub` is rejected even when its `email` claim matches the linked
+   user, and no local user is created.
 5. The client sends `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`,
    `assertion`, `client_id`, `client_secret`, and `scope=lab.read` to Keycloak.
    The ID-JAG-specific validator binds the asserted client to the authenticated
@@ -199,6 +201,18 @@ also passed. Its owned container
 `shoten-idjag-87c11961-3ad3-412a-93a8-4421df767685` (`96f3778c7559`) and its
 stopped collision fixture were removed; no lab service was left running. A later
 run overwrites the JSON with its own timestamps and container ID.
+
+On **2026-10-31** eight receiver-boundary checks were added, which brings the
+Keycloak-only suite to **44 checks** (the Entra-backed Federated run is unchanged
+at 36): the grant returns no refresh token; a request without client
+authentication is rejected (HTTP 401 `unauthorized_client`); a public client is
+rejected (HTTP 400 `invalid_grant`) while an identically configured confidential
+control client succeeds; an unlinked `sub` is rejected even when an `email` claim
+matches the linked user, and no local user is created; and an access token from an
+assertion that expires after six seconds is accepted by the resource before, and
+rejected after, its `exp` (the run waits about eight seconds for this). The names
+in `examples/author-run/keycloak/verified-results.json` (the 2026-10-31 run) define the launcher's
+expected set, so that file lists these checks too.
 
 `PASS` means a real observed HTTP status (and, where specified, OAuth error)
 matched the test expectation. Successful signature and claim checks have their

@@ -80,15 +80,21 @@ test('Keycloak token pair inspector redacts identifiers and renders ID-JAG vs Ac
   assert.equal(inspection.keycloak_access_token.payload.sub, '[LINKED_LOCAL_USER]');
   assert.deepEqual(inspection.keycloak_access_token.payload.aud, ['lab-api', 'account']);
   assert.equal(inspection.keycloak_access_token.payload.azp, 'receiver-client');
-  const report = { passed: true, token_inspection: inspection };
+  const report = { passed: true, schema: 'shoten.keycloak-idjag-receiver-results.v1', token_inspection: inspection };
   const idjagOut = renderKeycloakTokenView(report, 'idjag', 'payload');
   const atOut = renderKeycloakTokenView(report, 'keycloak_access_token', 'payload');
   assert.match(idjagOut, /header\.typ=oauth-id-jag\+jwt/);
   assert.match(idjagOut, /Header:\n\{\n  "alg": "RS256",\n  "typ": "oauth-id-jag\+jwt",\n  "kid": "\[REDACTED\]"\n\}\nPayload:/);
-  assert.match(idjagOut, /HTTP 401 invalid_token/);
+  assert.match(idjagOut, /^Direct API Bearer check \(GET \/resource\): HTTP 401 invalid_token$/m);
   assert.match(atOut, /header\.typ=JWT/);
   assert.match(atOut, /Header:\n\{\n  "alg": "RS256",\n  "typ": "JWT",\n  "kid": "\[REDACTED\]"\n\}\nPayload:/);
-  assert.match(atOut, /HTTP 200/);
+  assert.match(atOut, /^Direct API Bearer check \(GET \/resource\): HTTP 200$/m);
   assert(!idjagOut.includes('secret-jti-1'));
   assert(!atOut.includes('00000000-0000-0000-0000-000000000001'));
+
+  const federated = { ...report, schema: 'shoten.entra-custom-broker-keycloak-mcp-results.v1' };
+  assert.match(renderKeycloakTokenView(federated, 'idjag', 'payload'), /^MCP server Bearer check \(POST \/mcp\): HTTP 401 invalid_token$/m);
+  assert.match(renderKeycloakTokenView(federated, 'keycloak_access_token', 'payload'), /^MCP server Bearer check \(POST \/mcp\): HTTP 200$/m);
+  assert.doesNotMatch(renderKeycloakTokenView(federated, 'idjag', 'payload'), /GET \/resource/);
+  assert.throws(() => renderKeycloakTokenView({ ...report, schema: undefined }, 'idjag', 'payload'), /UnknownReportSchema/);
 });

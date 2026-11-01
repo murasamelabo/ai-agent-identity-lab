@@ -24,6 +24,8 @@ let externalSubject = 'synthetic-external-user';
 const FEDERATED = process.argv.includes('--federated-mcp');
 const TOKEN_URL = `${ISSUER}/protocol/openid-connect/token`;
 const CLIENT = 'receiver-client';
+const PUBLIC_CLIENT = 'public-lab-client';
+const LINKED_EMAIL = 'synthetic-reader@example.test';
 const JWT_GRANT = 'urn:ietf:params:oauth:grant-type:jwt-bearer';
 const EXCHANGE = 'urn:ietf:params:oauth:grant-type:token-exchange';
 const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
@@ -277,6 +279,8 @@ async function runTests() {
   const positive = await grant(valid);
   record('idjag_receiver_accepts_valid_assertion', positive, 200);
   assert.equal(positive.body.refresh_token, undefined, 'JWT grants must not return a refresh token');
+  cases.push({ name: 'idjag_exchange_returns_no_refresh_token', passed: true });
+  console.log('PASS idjag_exchange_returns_no_refresh_token');
   accessToken = positive.body.access_token;
   jwks = (await request(`${ISSUER}/protocol/openid-connect/certs`)).body;
   accessClaims = verifyAccessToken(accessToken);
@@ -337,6 +341,60 @@ async function runTests() {
       client_id: clientId, client_secret: secret,
     }), 400);
   }
+
+  // Client authentication and subject resolution at the receiver boundary.
+  const missingSecret = await request(TOKEN_URL, {
+    method: 'POST',
+    form: { grant_type: JWT_GRANT, assertion: assertion(), client_id: CLIENT, scope: 'lab.read' },
+  });
+  record('idjag_missing_client_authentication_rejected', missingSecret, 401);
+  assert(['invalid_client', 'unauthorized_client'].includes(missingSecret.body.error));
+  await admin(`${REALM}/clients`, 'POST', {
+    clientId: PUBLIC_CLIENT, enabled: true, protocol: 'openid-connect', publicClient: true,
+    standardFlowEnabled: false, directAccessGrantsEnabled: false,
+    attributes: {
+      'oauth2.jwt.authorization.grant.enabled': 'true',
+      'oauth2.jwt.authorization.grant.idp': 'custom-idjag-issuer',
+    },
+  });
+  const publicGrant = await request(TOKEN_URL, {
+    method: 'POST',
+    form: {
+      grant_type: JWT_GRANT, client_id: PUBLIC_CLIENT,
+      assertion: assertion({ claims: { client_id: PUBLIC_CLIENT } }),
+    },
+  });
+  record('idjag_public_client_rejected', publicGrant, 400, 'invalid_grant');
+  const controlClient = 'confidential-control-client';
+  const controlSecret = randomBytes(32).toString('base64url');
+  await admin(`${REALM}/clients`, 'POST', {
+    clientId: controlClient, secret: controlSecret, enabled: true, protocol: 'openid-connect',
+    publicClient: false, standardFlowEnabled: false, directAccessGrantsEnabled: false,
+    attributes: {
+      'oauth2.jwt.authorization.grant.enabled': 'true',
+      'oauth2.jwt.authorization.grant.idp': 'custom-idjag-issuer',
+    },
+  });
+  // Same configuration as the public client except for client authentication.
+  const controlGrant = await request(TOKEN_URL, {
+    method: 'POST',
+    form: {
+      grant_type: JWT_GRANT, client_id: controlClient, client_secret: controlSecret,
+      assertion: assertion({ claims: { client_id: controlClient } }),
+    },
+  });
+  record('idjag_confidential_control_client_accepted', controlGrant, 200);
+  await admin(`${REALM}/users/${linkedUserId}`, 'PUT', {
+    username: 'synthetic-reader', enabled: true, email: LINKED_EMAIL, emailVerified: true,
+  });
+  const usersBefore = (await admin(`${REALM}/users/count`)).body;
+  record('idjag_unlinked_subject_with_matching_email_rejected', await grant(assertion({
+    claims: { sub: 'not-linked', email: LINKED_EMAIL },
+  })), 400, 'invalid_grant');
+  const usersAfter = (await admin(`${REALM}/users/count`)).body;
+  assert.equal(usersAfter, usersBefore, 'An unlinked subject must not create or select a local user');
+  cases.push({ name: 'idjag_unlinked_subject_creates_no_user', passed: true });
+  console.log('PASS idjag_unlinked_subject_creates_no_user');
 
   // Controls: these use the generic RFC 7523 validator, NOT the ID-JAG validator.
   record('rfc7523_plain_jwt_without_client_id_accepted', await grant(assertion({
@@ -423,6 +481,14 @@ async function runTests() {
   record('resource_accepts_receiver_access_token', await request(resourceUrl, { bearer: accessToken }), 200);
   record('resource_rejects_identity_assertion_as_bearer', await request(resourceUrl, { bearer: assertion() }), 401);
   record('resource_rejects_missing_token', await request(resourceUrl), 401);
+  // The receiver does not consult the issuer again: the access token lives until its own exp.
+  const shortLivedExpiry = Math.floor(Date.now() / 1000) + 6;
+  const shortLived = await grant(assertion({ claims: { exp: shortLivedExpiry } }));
+  assert.equal(shortLived.status, 200, 'Short-lived assertion must be accepted');
+  const shortLivedToken = shortLived.body.access_token;
+  record('short_lived_access_token_accepted_before_expiry', await request(resourceUrl, { bearer: shortLivedToken }), 200);
+  await new Promise((resolve) => setTimeout(resolve, 8000));
+  record('short_lived_access_token_rejected_after_expiry', await request(resourceUrl, { bearer: shortLivedToken }), 401);
   assert.throws(() => verifyAccessToken(accessToken, { audience: 'another-api' }));
   cases.push({ name: 'resource_audience_validation_rejects_another_api', passed: true });
 }
@@ -518,6 +584,7 @@ try {
       'Experimental Keycloak ID-JAG receiver based on its documented draft-01; not a conformance certification.',
       'Custom signer creates synthetic fixtures, not an enterprise IdP or native Keycloak ID-JAG issuer.',
       'RFC 7523 is separately accepted; unrecognized typ dispatches to generic validation.',
+      'Observed error codes are those of Keycloak 26.8.1 and can differ from the profile in later ID-JAG drafts, for example invalid_grant for a public client or an unlinked subject.',
       'The configured maxAllowedAssertionExpiration limits iat age and replay-cache lifespan, not exp minus iat. Main fixtures expire in 120 seconds, below the configured 180 seconds.',
       'No OIDC authorization-code login, ID-token-to-ID-JAG exchange, MCP protocol, or full MCP EMA flow.',
       'Resource is a minimal HTTP JWT verifier, not an MCP server.',

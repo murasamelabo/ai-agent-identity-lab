@@ -16,12 +16,12 @@ Entra ID の On-Behalf-Of (OBO) と、Keycloak の実験的な ID-JAG 受信機�
 
 前提: スクリプトの実行を許可されたWindows PowerShell 5.1またはPowerShell 7、Node.js 22以上、Linuxコンテナーを使えるDocker Desktop。Python 3.11以上とAzure CLI v2はEntra実験で使います。Docker用ループバックポート **18080** を空けてください。イメージや依存関係の取得、Entraの実験にはインターネット接続が必要です。アプリ登録と同意に必要な権限は自分のテナント管理者と確認してください。組織の実行ポリシーを自動で回避する処理はありません。
 
-書籍の再現用バージョンは `v1.3.0` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションは毎回新しい実験を実行します。端末画面を撮影するためのスクリプトはこの版で削除しました。既存の `v1.0.0`～`v1.2.2` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
+書籍の再現用バージョンは `v1.3.1` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションは毎回新しい実験を実行します。端末画面を撮影するためのスクリプトは `v1.3.0` で削除しました。`v1.3.1` では、Keycloak単独の検査に受信側の境界の検査を8件加えて44件にし、Federated の結果を表示するときのBearer検査の表示名を、実際の検査(MCPサーバーへの `POST /mcp`)に合わせました。`docs/screenshots/entra-portal-*.png` は、右上のアカウント表示を伏せた画像に差し替えました。既存の `v1.0.0`～`v1.3.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
 
 ```powershell
 git clone https://github.com/murasamelabo/ai-agent-identity-lab.git
 Set-Location ai-agent-identity-lab
-git checkout v1.3.0
+git checkout v1.3.1
 .\scripts\lab.ps1 -Action Setup -SkipPython
 .\scripts\lab.ps1 -Action Doctor
 .\scripts\lab.ps1 -Action Test -SkipPython
@@ -149,7 +149,7 @@ JWT追加検証の実際の端末画面です。元のJWTをそのまま公開�
 
 - `entra/lab.py`, `entra/report_safety.py`, `entra/lab-manifest.json`, `entra/requirements.txt`：Entra実験と報告の検証。
 - `keycloak/run.mjs`, `keycloak/federated-mcp.mjs`, `keycloak/package.json`：Keycloak単独／オプション連携。既定のループバックポートは18080。
-- `entra/test_*.py`, `keycloak/*.test.mjs`：65件のPythonと10件のNodeオフラインテスト。受信機／連携の各36件の統合チェックには実サービスが必要です。
+- `entra/test_*.py`, `keycloak/*.test.mjs`：64件のPythonと12件のNodeオフラインテスト。統合チェックは受信機が44件、連携が36件で、実サービスが必要です。
 - `examples/author-run/`：著者の実行例。自分の成功の証拠ではありません。
 
 ## AI支援ツールを使う場合
