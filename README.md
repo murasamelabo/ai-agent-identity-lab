@@ -16,12 +16,12 @@ Entra ID の On-Behalf-Of (OBO) と、Keycloak の実験的な ID-JAG 受信機�
 
 前提: スクリプトの実行を許可されたWindows PowerShell 5.1またはPowerShell 7、Node.js 22以上、Linuxコンテナーを使えるDocker Desktop。Python 3.11以上とAzure CLI v2はEntra実験で使います。Docker用ループバックポート **18080** を空けてください。イメージや依存関係の取得、Entraの実験にはインターネット接続が必要です。アプリ登録と同意に必要な権限は自分のテナント管理者と確認してください。組織の実行ポリシーを自動で回避する処理はありません。
 
-書籍の再現用バージョンは `v1.3.1` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションは毎回新しい実験を実行します。端末画面を撮影するためのスクリプトは `v1.3.0` で削除しました。`v1.3.1` では、Keycloak単独の検査に受信側の境界の検査を8件加えて44件にし、Federated の結果を表示するときのBearer検査の表示名を、実際の検査(MCPサーバーへの `POST /mcp`)に合わせました。`docs/screenshots/entra-portal-*.png` は、右上のアカウント表示を伏せた画像に差し替えました。既存の `v1.0.0`～`v1.3.0` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
+書籍の再現用バージョンは `v1.3.2` です。段階別のアクション(`EntraPrepare`、`EntraAuthz`、`FederatedPrepare`、`FederatedRun`)を含み、Federated の各アクションは毎回新しい実験を実行します。端末画面を撮影するためのスクリプトは `v1.3.0` で削除しました。`v1.3.1` では、Keycloak単独の検査に受信側の境界の検査を8件加えて44件にし、Federated の結果を表示するときのBearer検査の表示名を、実際の検査(MCPサーバーへの `POST /mcp`)に合わせました。`docs/screenshots/entra-portal-*.png` は、右上のアカウント表示を伏せた画像に差し替えました。`v1.3.2` では、`Keycloak`、`Federated`、`FederatedRun` の画面を、検査名の一覧から、実際に送った要求、受け取った応答、トークンの抜粋、サーバー側のログを順に表示する形に変えました。署名、クライアントシークレット、テナントIDなどの識別子は表示しません。拒否した件でも、送ったトークンのヘッダーとクレームの抜粋を表示します。有効なトークンとの違いは `[valid: …]`、リソース側が要求する値と合わない項目は `[required: …]` で示し、署名を含むトークン全体の SHA-256 の先頭 8 桁を指紋として添えるので、同じトークンかどうかを見分けられます。時刻のクレームは、要求を送った時刻(`now`)からの差で示します。`Federated` と `FederatedRun` では、Issuerと MCP サーバーのループバックポートを環境変数 `FEDERATED_LAB_ISSUER_PORT` と `FEDERATED_LAB_MCP_PORT` で固定できます(画面例を再現したいときに使います)。既存の `v1.0.0`～`v1.3.1` は変更していません。まずAzureを使わないKeycloak単独の実験を実行できます。
 
 ```powershell
 git clone https://github.com/murasamelabo/ai-agent-identity-lab.git
 Set-Location ai-agent-identity-lab
-git checkout v1.3.1
+git checkout v1.3.2
 .\scripts\lab.ps1 -Action Setup -SkipPython
 .\scripts\lab.ps1 -Action Doctor
 .\scripts\lab.ps1 -Action Test -SkipPython
@@ -45,7 +45,7 @@ az login --tenant "<検証用テナントID>" --allow-no-subscriptions
 .\scripts\lab.ps1 -Action Cleanup
 ```
 
-`EntraPrepare` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraRun` は `EntraPrepare` で準備した構成を使って 3 種類のトークンを取得・比較し、`EntraAuthz` は取得したトークンに対するローカルの認可判定を表示します。`FederatedPrepare` と `FederatedRun` は、どちらも Keycloak（Receiver）と独自 Issuer、MCP サーバーを一時的に起動して、ID-JAG の交換から MCP 呼び出しまでの実験を毎回新しく実行し、終了時に一時サービスを停止します。保存済みの結果を今回の実行として表示することはありません。`FederatedPrepare` は完了した実験で使った構成(信頼関係、ユーザーの対応付け、MCP サーバー)を、`FederatedRun` は交換と呼び出しの結果を表示します。**すべての Federated 実行が終わってから Cleanup** を行います。
+`EntraPrepare` は専用の **2 アプリ登録と各サービスプリンシパル**、新規カスタムスコープへのユーザー単位の同意・アプリロール割り当て、**24 時間のシークレット**を作ります。シークレットは Windows の `%LOCALAPPDATA%` 配下の ACL 保護されたプライベート状態に保持し、リポジトリには入れません。現在の Azure CLI セッション、アプリ管理権限および必要な同意が要ります。テナントポリシー変更、既存アプリ変更、Microsoft Graph 権限の新規付与、MFA 回避はしません。`EntraRun` は `EntraPrepare` で準備した構成を使って 3 種類のトークンを取得・比較し、`EntraAuthz` は取得したトークンに対するローカルの認可判定を表示します。`FederatedPrepare` と `FederatedRun` は、どちらも Keycloak（Receiver）と独自 Issuer、MCP サーバーを一時的に起動して、ID-JAG の交換から MCP 呼び出しまでの実験を毎回新しく実行し、終了時に一時サービスを停止します。保存済みの結果を今回の実行として表示することはありません。`FederatedPrepare` は完了した実験で使った構成(信頼関係、ユーザーの対応付け、MCP サーバー)を、`FederatedRun` は交換と呼び出しを、実際の要求・応答・トークンの抜粋・サーバーのログの順に表示します。`Federated` は拒否の確認を含む36件、`Keycloak` は44件を、同じ形式で表示します。**すべての Federated 実行が終わってから Cleanup** を行います。
 
 `Report` は同じ実行の保護されたローカル状態で検証してから、マスク済みの実トークン比較を端末へ出力します。`examples/author-run/` は著者の過去の実行例であり、読者の実行結果ではありません。自分の出力先 `entra/reports/` と `keycloak/results/` はGitで無視します。レポートの伏字化やローカル整合性検証は、第三者による認証や安全性の証明ではありません。共有前に人間が内容を確認してください。
 
@@ -124,7 +124,7 @@ Dockerによる作成後に所有確認ができなかった場合、公開用�
 ## 著者の実際の端末画面
 
 以下は、このリポジトリのコマンドを著者が実行した端末の画面です。
-Reportは取得済みのEntra実測の検証・表示、残り二つは実験を実行した画面です。KeycloakとFederatedの画面は主な検査だけを表示した時点のもので、現在の `lab.ps1` では検証したすべての検査名を表示します。
+Reportは取得済みのEntra実測の検証・表示、残り二つは実験を実行した画面です。KeycloakとFederatedの画面は、検査名の一覧を表示していた`v1.3.1`までの形式のものです。`v1.3.2` 以降の `lab.ps1` は、検査名ではなく、実際の要求・応答・トークンの抜粋・サーバーのログを表示します。
 読者の実行結果ではありません。
 
 ![実際のReport実行画面](docs/screenshots/terminal-report.png)
@@ -149,7 +149,7 @@ JWT追加検証の実際の端末画面です。元のJWTをそのまま公開�
 
 - `entra/lab.py`, `entra/report_safety.py`, `entra/lab-manifest.json`, `entra/requirements.txt`：Entra実験と報告の検証。
 - `keycloak/run.mjs`, `keycloak/federated-mcp.mjs`, `keycloak/package.json`：Keycloak単独／オプション連携。既定のループバックポートは18080。
-- `entra/test_*.py`, `keycloak/*.test.mjs`：64件のPythonと12件のNodeオフラインテスト。統合チェックは受信機が44件、連携が36件で、実サービスが必要です。
+- `entra/test_*.py`, `keycloak/*.test.mjs`：64件のPythonと22件のNodeオフラインテスト。統合チェックは受信機が44件、連携が36件で、実サービスが必要です。
 - `examples/author-run/`：著者の実行例。自分の成功の証拠ではありません。
 
 ## AI支援ツールを使う場合

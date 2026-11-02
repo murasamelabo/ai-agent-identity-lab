@@ -6,6 +6,7 @@ import {
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { recorder } from './trace.mjs';
 
 const VERSION = '2025-11-25';
 const EMA_REVISION = 'e5eef546e4fc025ceaee6a935aa33cb4cd904b4f';
@@ -81,7 +82,11 @@ async function http(url, { method = 'GET', json, form, bearer, headers = {} } = 
     method, headers: sentHeaders, body, redirect: 'error', signal: AbortSignal.timeout(15000),
   });
   const text = await response.text();
-  return { status: response.status, body: text ? JSON.parse(text) : null, headers: response.headers };
+  const parsed = text ? JSON.parse(text) : null;
+  const trace = recorder.http({
+    method, url, form, json, bearer, headers, status: response.status, body: parsed, responseHeaders: response.headers,
+  });
+  return { status: response.status, body: parsed, headers: response.headers, trace };
 }
 
 export function verifySignedJwt(jwt, jwks, issuer, audience) {
@@ -261,6 +266,24 @@ function respond(res, status, body, headers = {}) {
   res.end(body === undefined ? undefined : JSON.stringify(body));
 }
 
+// The reason is also written to the server log of this run, so a rejection is explained by the server that made it.
+function deny(res, status, reason, body, headers = {}) {
+  res.lab = { ...res.lab, outcome: 'rejected', reason };
+  return respond(res, status, body, headers);
+}
+
+function observe(server, source) {
+  return (req, res) => {
+    res.lab = {};
+    res.on('finish', () => recorder.server({
+      source, method: req.method, path: String(req.url ?? '').split('?')[0], status: res.statusCode,
+      outcome: res.lab.outcome ?? (res.statusCode < 400 ? 'accepted' : 'rejected'),
+      reason: res.lab.reason, rpc: res.lab.rpc, bearer: res.lab.bearer,
+    }));
+    server(req, res);
+  };
+}
+
 async function body(req) {
   const parts = [];
   let size = 0;
@@ -272,27 +295,36 @@ async function body(req) {
   return Buffer.concat(parts).toString('utf8');
 }
 
-async function listen(server) {
+async function listen(server, requestedPort) {
+  const port = requestedPort === undefined || requestedPort === '' ? 0 : Number(requestedPort);
+  requireValue(Number.isInteger(port) && (port === 0 || (port >= 1024 && port <= 65535)), 'InvalidLoopbackPort');
   server.requestTimeout = 10000;
   server.headersTimeout = 10000;
   await new Promise((resolve, reject) => {
     server.once('error', () => reject(new Error('LoopbackServerUnavailable')));
-    server.listen(0, '127.0.0.1', resolve);
+    server.listen(port, '127.0.0.1', resolve);
   });
   return `http://127.0.0.1:${server.address().port}`;
 }
 
 export async function prepareFederatedMcp({ receiverIssuer, privateKey, publicKey }) {
   const contract = readPrivateContract();
+  recorder.mask(contract.tenant, '[TENANT_ID]');
+  recorder.mask(contract.user, '[USER_A]');
+  recorder.mask(contract.apiA, '[AI_AGENT_APP]');
+  recorder.mask(contract.apiB, '[BACKEND_API]');
+  recorder.mask(CLI_CLIENT, '[FRONTEND_CLI]');
   const token = acquireOwnApiUserToken(contract); // One authorized acquisition; no retry/login fallback.
   const issuer = `https://login.microsoftonline.com/${contract.tenant}/v2.0`;
   let jwks;
   try {
     const metadata = await http(`${issuer}/.well-known/openid-configuration`);
+    recorder.name(metadata.trace, 'entra_openid_configuration');
     requireValue(metadata.status === 200 && metadata.body.issuer === issuer, 'EntraMetadataUnavailable');
     const keysUrl = new URL(metadata.body.jwks_uri);
     requireValue(keysUrl.protocol === 'https:' && keysUrl.hostname === 'login.microsoftonline.com', 'UntrustedEntraKeysEndpoint');
     const keys = await http(keysUrl.href);
+    recorder.name(keys.trace, 'entra_signing_keys');
     requireValue(keys.status === 200 && Array.isArray(keys.body.keys), 'EntraKeysUnavailable');
     jwks = keys.body;
   } catch {
@@ -327,20 +359,22 @@ class FederatedMcp {
   }
 
   async start() {
-    this.brokerServer = createServer((req, res) => {
+    this.brokerServer = createServer(observe((req, res) => {
       this.brokerRequest(req, res).catch(() => {
-        if (!res.headersSent) respond(res, 400, { error: 'invalid_request' });
+        if (!res.headersSent) deny(res, 400, 'request could not be processed', { error: 'invalid_request' });
         else res.end();
       });
-    });
-    this.issuer = await listen(this.brokerServer);
-    this.mcpServer = createServer((req, res) => {
+    }, 'issuer'));
+    this.issuer = await listen(this.brokerServer, process.env.FEDERATED_LAB_ISSUER_PORT);
+    recorder.origin(this.issuer, 'issuer');
+    this.mcpServer = createServer(observe((req, res) => {
       this.mcpRequest(req, res).catch(() => {
-        if (!res.headersSent) respond(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' } });
+        if (!res.headersSent) deny(res, 400, 'request could not be processed', { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' } });
         else res.end();
       });
-    });
-    this.mcpBase = await listen(this.mcpServer);
+    }, 'mcp'));
+    this.mcpBase = await listen(this.mcpServer, process.env.FEDERATED_LAB_MCP_PORT);
+    recorder.origin(this.mcpBase, 'mcp');
     this.resource = `${this.mcpBase}/mcp`;
     this.metadataUrl = `${this.mcpBase}/.well-known/oauth-protected-resource/mcp`;
   }
@@ -362,7 +396,7 @@ class FederatedMcp {
   }
 
   async brokerRequest(req, res) {
-    if (!this.checkOrigin(req, this.issuer)) return respond(res, 403, { error: 'invalid_request' });
+    if (!this.checkOrigin(req, this.issuer)) return deny(res, 403, 'Host or Origin is not the Issuer', { error: 'invalid_request' });
     if (req.method === 'GET' && req.url === '/.well-known/oauth-authorization-server') {
       return respond(res, 200, {
         issuer: this.issuer, token_endpoint: `${this.issuer}/token`,
@@ -375,22 +409,29 @@ class FederatedMcp {
         ...this.publicKey.export({ format: 'jwk' }), kid: 'ephemeral-lab-key', use: 'sig', alg: 'RS256',
       }] });
     }
-    if (req.method !== 'POST' || req.url !== '/token') return respond(res, 404, { error: 'invalid_request' });
-    if (!req.headers['content-type']?.startsWith('application/x-www-form-urlencoded')) return respond(res, 415, { error: 'invalid_request' });
+    if (req.method !== 'POST' || req.url !== '/token') return deny(res, 404, 'unknown path', { error: 'invalid_request' });
+    if (!req.headers['content-type']?.startsWith('application/x-www-form-urlencoded')) return deny(res, 415, 'content type must be application/x-www-form-urlencoded', { error: 'invalid_request' });
     const form = new URLSearchParams(await body(req));
-    if ([...new Set(form.keys())].some((name) => form.getAll(name).length !== 1)) return respond(res, 400, { error: 'invalid_request' });
+    const refuse = (status, error, description) => deny(res, status, description, { error, error_description: description });
+    if ([...new Set(form.keys())].some((name) => form.getAll(name).length !== 1)) return refuse(400, 'invalid_request', 'a parameter was sent more than once');
     if (form.get('client_id') !== this.clientId || !safeEqual(form.get('client_secret'), this.brokerSecret)) {
-      return respond(res, 401, { error: 'invalid_client' });
+      return refuse(401, 'invalid_client', 'client_id or client_secret does not match');
     }
-    if (form.get('grant_type') !== EXCHANGE) return respond(res, 400, { error: 'unsupported_grant_type' });
-    if (form.get('requested_token_type') !== IDJAG || form.get('subject_token_type') !== ACCESS) return respond(res, 400, { error: 'invalid_request' });
-    if (form.get('audience') !== this.receiverIssuer || form.get('resource') !== this.resource) return respond(res, 400, { error: 'invalid_target' });
-    if (form.get('scope') !== 'mcp.read') return respond(res, 400, { error: 'invalid_scope' });
+    if (form.get('grant_type') !== EXCHANGE) return refuse(400, 'unsupported_grant_type', 'grant_type must be token-exchange');
+    if (form.get('requested_token_type') !== IDJAG || form.get('subject_token_type') !== ACCESS) {
+      return refuse(400, 'invalid_request', 'requested_token_type must be id-jag and subject_token_type access_token');
+    }
+    if (form.get('audience') !== this.receiverIssuer) return refuse(400, 'invalid_target', 'audience is not the registered Receiver');
+    if (form.get('resource') !== this.resource) return refuse(400, 'invalid_target', 'resource is not the registered MCP server');
+    if (form.get('scope') !== 'mcp.read') return refuse(400, 'invalid_scope', 'scope must be mcp.read');
     const input = form.get('subject_token');
-    try { this.validate(input); } catch { return respond(res, 400, { error: 'invalid_grant' }); }
+    try { this.validate(input); } catch (error) {
+      return refuse(400, 'invalid_grant', `subject_token is not acceptable (${error.message})`);
+    }
     const tokenHash = createHash('sha256').update(input).digest('hex');
-    if (this.usedInputTokens.has(tokenHash)) return respond(res, 400, { error: 'invalid_grant' });
+    if (this.usedInputTokens.has(tokenHash)) return refuse(400, 'invalid_grant', 'subject_token was already used (one-use policy of this lab Issuer)');
     this.usedInputTokens.add(tokenHash);
+    res.lab = { outcome: 'issued', reason: 'subject_token verified; ID-JAG token signed with the ephemeral key' };
     return respond(res, 200, {
       issued_token_type: IDJAG, access_token: this.issueAssertion(),
       token_type: 'N_A', expires_in: 120, scope: 'mcp.read',
@@ -405,51 +446,57 @@ class FederatedMcp {
   }
 
   async mcpRequest(req, res) {
-    if (!this.checkOrigin(req, this.mcpBase)) return respond(res, 403, { error: 'invalid_origin' });
+    if (!this.checkOrigin(req, this.mcpBase)) return deny(res, 403, 'Host or Origin is not the MCP server origin', { error: 'invalid_origin' });
     if (req.method === 'GET' && req.url === '/.well-known/oauth-protected-resource/mcp') {
       return respond(res, 200, {
         resource: this.resource, authorization_servers: [this.receiverIssuer],
         scopes_supported: ['mcp.read'], bearer_methods_supported: ['header'],
       });
     }
-    if (req.url !== '/mcp') return respond(res, 404);
+    if (req.url !== '/mcp') return deny(res, 404, 'unknown path');
     try {
       requireValue(req.headers.authorization?.startsWith('Bearer '), 'MissingBearer');
-      this.verifyMcpToken(req.headers.authorization.slice(7));
-    } catch {
-      return respond(res, 401, { error: 'invalid_token' }, {
+      const presented = req.headers.authorization.slice(7);
+      res.lab.bearer = presented;
+      this.verifyMcpToken(presented);
+    } catch (error) {
+      return deny(res, 401, `Bearer token rejected (${error.message})`, { error: 'invalid_token' }, {
         'www-authenticate': `Bearer resource_metadata="${this.metadataUrl}", scope="mcp.read"`,
       });
     }
-    if (req.method === 'GET') return respond(res, 405, undefined, { allow: 'POST, DELETE' });
+    res.lab.reason = 'Bearer token verified (signature, iss, aud, exp, scope, azp, sub)';
+    if (req.method === 'GET') return deny(res, 405, 'GET (optional SSE stream) is not offered', undefined, { allow: 'POST, DELETE' });
     const sessionId = req.headers['mcp-session-id'];
     const session = this.sessions.get(sessionId);
     if (req.method === 'DELETE') {
-      if (req.headers['mcp-protocol-version'] !== VERSION) return respond(res, 400);
-      if (!session) return respond(res, 404);
+      if (req.headers['mcp-protocol-version'] !== VERSION) return deny(res, 400, 'MCP-Protocol-Version header is missing or unsupported');
+      if (!session) return deny(res, 404, 'unknown or ended session');
       this.sessions.delete(sessionId);
+      res.lab.reason = 'session ended';
       return respond(res, 204);
     }
-    if (req.method !== 'POST') return respond(res, 405, undefined, { allow: 'POST, GET, DELETE' });
-    if (!req.headers.accept?.includes('application/json') || !req.headers.accept.includes('text/event-stream')) return respond(res, 406);
-    if (!req.headers['content-type']?.startsWith('application/json')) return respond(res, 415);
+    if (req.method !== 'POST') return deny(res, 405, 'method not allowed', undefined, { allow: 'POST, GET, DELETE' });
+    if (!req.headers.accept?.includes('application/json') || !req.headers.accept.includes('text/event-stream')) return deny(res, 406, 'Accept must list application/json and text/event-stream');
+    if (!req.headers['content-type']?.startsWith('application/json')) return deny(res, 415, 'content type must be application/json');
     let message;
     try { message = JSON.parse(await body(req)); } catch {
-      return respond(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      return deny(res, 400, 'JSON parse error', { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
     }
     if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string' || Array.isArray(message)
       || (Object.hasOwn(message, 'id') && !['string', 'number'].includes(typeof message.id))) {
-      return respond(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
+      return deny(res, 400, 'not a JSON-RPC 2.0 request', { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
     }
+    res.lab.rpc = message.method;
     const reply = (result) => respond(res, 200, { jsonrpc: '2.0', id: message.id, result });
     const rpcError = (code, text) => respond(res, 200, { jsonrpc: '2.0', id: message.id, error: { code, message: text } });
     if (message.method === 'initialize') {
       if (sessionId || !Object.hasOwn(message, 'id') || typeof message.params?.protocolVersion !== 'string'
         || !message.params.capabilities || typeof message.params.clientInfo?.name !== 'string'
-        || typeof message.params.clientInfo?.version !== 'string') return respond(res, 400);
-      if (this.sessions.size >= 8) return respond(res, 429);
+        || typeof message.params.clientInfo?.version !== 'string') return deny(res, 400, 'initialize needs protocolVersion, capabilities and clientInfo, and no session');
+      if (this.sessions.size >= 8) return deny(res, 429, 'too many sessions');
       const id = randomUUID();
       this.sessions.set(id, { initialized: false });
+      res.lab.reason = 'session created';
       return respond(res, 200, {
         jsonrpc: '2.0', id: message.id, result: {
           protocolVersion: VERSION, capabilities: { tools: { listChanged: false } },
@@ -457,14 +504,15 @@ class FederatedMcp {
         },
       }, { 'mcp-session-id': id });
     }
-    if (req.headers['mcp-protocol-version'] !== VERSION) return respond(res, 400);
-    if (!sessionId) return respond(res, 400);
-    if (!session) return respond(res, 404);
+    if (req.headers['mcp-protocol-version'] !== VERSION) return deny(res, 400, 'MCP-Protocol-Version header is missing or unsupported');
+    if (!sessionId) return deny(res, 400, 'MCP-Session-Id header is missing');
+    if (!session) return deny(res, 404, 'unknown or ended session');
     if (message.method === 'notifications/initialized' && !Object.hasOwn(message, 'id')) {
       session.initialized = true;
+      res.lab.reason = 'session initialized';
       return respond(res, 202);
     }
-    if (!session.initialized) return respond(res, 400);
+    if (!session.initialized) return deny(res, 400, 'notifications/initialized has not been received yet');
     if (!Object.hasOwn(message, 'id')) return respond(res, 202);
     if (message.method === 'ping') return reply({});
     if (message.method === 'tools/list') {
@@ -481,11 +529,16 @@ class FederatedMcp {
       const args = message.params?.arguments;
       if (message.params?.name !== 'read_synthetic_document' || !args || Array.isArray(args)
         || Object.keys(args).length !== 1 || !['alice', 'bob'].includes(args.documentId)) {
+        res.lab = { ...res.lab, outcome: 'rejected', reason: 'invalid tool name or arguments (JSON-RPC error -32602)' };
         return rpcError(-32602, 'Invalid tool name or arguments');
       }
-      if (args.documentId === 'bob') return reply({
-        content: [{ type: 'text', text: 'Access denied to synthetic other-user document.' }], isError: true,
-      });
+      if (args.documentId === 'bob') {
+        res.lab = { ...res.lab, outcome: 'denied', reason: 'tool result isError=true: the other user document is not readable' };
+        return reply({
+          content: [{ type: 'text', text: 'Access denied to synthetic other-user document.' }], isError: true,
+        });
+      }
+      res.lab.reason = 'tool result: the synthetic document of the signed-in user';
       return reply({
         content: [{ type: 'text', text: 'Synthetic Alice document: Entra-backed MCP authorization succeeded.' }],
         isError: false,
@@ -529,6 +582,7 @@ class FederatedMcp {
   check(name, response, status, error) {
     assert.equal(response.status, status, `${name}: unexpected HTTP status`);
     if (error) assert.equal(response.body?.error, error, `${name}: unexpected error code`);
+    recorder.name(response.trace, name);
     this.tests.push({
       name, passed: true, http_status: response.status,
       ...(error ? { oauth_error: error } : {}),
@@ -537,18 +591,27 @@ class FederatedMcp {
   }
 
   async execute() {
-    const localCheck = (name, action) => {
-      action();
+    const localCheck = (name, action, { reject, detail, token } = {}) => {
+      let failure;
+      try { action(); } catch (error) { failure = error; }
+      if (reject) assert.equal(failure?.message, reject, `${name}: expected ${reject}`);
+      else if (failure) throw failure;
       this.tests.push({ name, passed: true });
       console.log(`PASS ${name}`);
+      recorder.local({ name, outcome: reject ? 'rejected' : 'ok', detail: detail ?? (reject ? `rejected with ${reject}` : undefined), token });
     };
-    localCheck('real_entra_user_signature_issuer_audience_expiry_scope_verified', () => this.validate(this.token));
-    localCheck('real_entra_token_wrong_api_audience_rejected', () => assert.throws(
-      () => this.validate(this.token, { audience: this.wrongAudience }), /WrongAudience/,
-    ));
-    localCheck('real_entra_token_missing_required_user_scope_rejected', () => assert.throws(
-      () => this.validate(this.token, { scope: 'unauthorized.synthetic.scope' }), /MissingEntraUserScope/,
-    ));
+    const entraSummary = recorder.token(this.token, 'entra');
+    localCheck('real_entra_user_signature_issuer_audience_expiry_scope_verified', () => this.validate(this.token), {
+      token: entraSummary, detail: 'verified in memory with the signing keys fetched from Entra',
+    });
+    localCheck('real_entra_token_wrong_api_audience_rejected', () => this.validate(this.token, { audience: this.wrongAudience }), {
+      reject: 'WrongAudience', token: entraSummary,
+      detail: `required aud=${this.wrongAudience}, but the token has aud=${this.claims.aud}: WrongAudience`,
+    });
+    localCheck('real_entra_token_missing_required_user_scope_rejected', () => this.validate(this.token, { scope: 'unauthorized.synthetic.scope' }), {
+      reject: 'MissingEntraUserScope', token: entraSummary,
+      detail: `required scope=unauthorized.synthetic.scope, but the token has scp=${this.claims.scp}: MissingEntraUserScope`,
+    });
     const anonymous = await http(this.resource, { method: 'POST', json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
     this.check('mcp_missing_token_challenges_with_protected_resource_metadata', anonymous, 401, 'invalid_token');
     assert(anonymous.headers.get('www-authenticate').includes(this.metadataUrl));
@@ -573,7 +636,9 @@ class FederatedMcp {
     this.check('broker_rejects_unregistered_target_audience', await exchange({ audience: `${this.receiverIssuer}/wrong` }), 400, 'invalid_target');
     this.check('broker_rejects_unapproved_resource', await exchange({ resource: `${this.resource}/wrong` }), 400, 'invalid_target');
     this.check('broker_rejects_unapproved_scope', await exchange({ scope: 'mcp.admin' }), 400, 'invalid_scope');
-    this.check('broker_rejects_wrong_client_secret', await exchange({ client_secret: 'incorrect-synthetic-secret' }), 401, 'invalid_client');
+    const wrongSecret = await exchange({ client_secret: 'incorrect-synthetic-secret' });
+    this.check('broker_rejects_wrong_client_secret', wrongSecret, 401, 'invalid_client');
+    recorder.note(wrongSecret.trace, 'client_secret is a deliberately wrong value (the real secret is never printed); the Entra token is valid');
     this.check('broker_rejects_invalid_subject_token', await exchange({ subject_token: 'not-a-token' }), 400, 'invalid_grant');
     const issued = await exchange();
     assert.equal(issued.body.issued_token_type, IDJAG);
@@ -602,12 +667,19 @@ class FederatedMcp {
     this.check('native_keycloak_rejects_idjag_replay', await http(`${this.receiverIssuer}/protocol/openid-connect/token`, {
       method: 'POST', form: receiverForm,
     }), 400, 'invalid_grant');
-    localCheck('real_keycloak_token_wrong_resource_audience_rejected', () => assert.throws(
-      () => this.verifyMcpToken(accessToken, { audience: `${this.resource}/wrong` }), /WrongAudience/,
-    ));
-    localCheck('real_keycloak_token_missing_required_admin_scope_rejected', () => assert.throws(
-      () => this.verifyMcpToken(accessToken, { scope: 'mcp.admin' }), /MissingMcpScope/,
-    ));
+    const accessSummary = recorder.token(accessToken, 'access');
+    localCheck('real_keycloak_token_wrong_resource_audience_rejected', () => this.verifyMcpToken(
+      accessToken, { audience: `${this.resource}/wrong` },
+    ), {
+      reject: 'WrongAudience', token: accessSummary,
+      detail: `required aud=${this.resource}/wrong, but the token has aud=${accessClaims.aud}: WrongAudience`,
+    });
+    localCheck('real_keycloak_token_missing_required_admin_scope_rejected', () => this.verifyMcpToken(
+      accessToken, { scope: 'mcp.admin' },
+    ), {
+      reject: 'MissingMcpScope', token: accessSummary,
+      detail: `required scope=mcp.admin, but the token has scope=${accessClaims.scope}: MissingMcpScope`,
+    });
 
     let sessionId;
     let nextId = 10;
@@ -623,7 +695,9 @@ class FederatedMcp {
     this.check('mcp_rejects_idjag_as_resource_bearer', await rpc('tools/list', {}, { bearer: assertion }), 401, 'invalid_token');
     const segments = accessToken.split('.');
     segments[2] = `${segments[2][0] === 'A' ? 'B' : 'A'}${segments[2].slice(1)}`;
-    this.check('mcp_rejects_tampered_access_token', await rpc('tools/list', {}, { bearer: segments.join('.') }), 401, 'invalid_token');
+    const tampered = await rpc('tools/list', {}, { bearer: segments.join('.') });
+    this.check('mcp_rejects_tampered_access_token', tampered, 401, 'invalid_token');
+    recorder.note(tampered.trace, 'the first character of the access token signature was changed; header and claims are untouched');
     this.check('mcp_rejects_hostile_origin', await rpc('tools/list', {}, { headers: { Origin: 'https://untrusted.invalid' } }), 403, 'invalid_origin');
     this.check('mcp_requires_initialize_before_tools', await rpc('tools/list'), 400);
     const initialized = await rpc('initialize', {

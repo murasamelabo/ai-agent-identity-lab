@@ -10,7 +10,7 @@
     "test": "node run.mjs",
     "test:federated": "node run.mjs --federated-mcp",
     "test:ownership": "node --test owned-container.test.mjs",
-    "test:unit": "node --test owned-container.test.mjs federated-mcp.test.mjs",
-    "check": "node --check run.mjs && node --check owned-container.mjs && node --check owned-container.test.mjs && node --check federated-mcp.mjs && node --check federated-mcp.test.mjs"
+    "test:unit": "node --test owned-container.test.mjs federated-mcp.test.mjs trace.test.mjs",
+    "check": "node --check run.mjs && node --check owned-container.mjs && node --check owned-container.test.mjs && node --check federated-mcp.mjs && node --check federated-mcp.test.mjs && node --check trace.mjs && node --check trace.test.mjs"
   }
 }

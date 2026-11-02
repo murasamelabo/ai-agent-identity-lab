@@ -1,5 +1,5 @@
 ﻿import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   createPublicKey, generateKeyPairSync, randomBytes, randomUUID, sign, verify,
 } from 'node:crypto';
@@ -10,6 +10,7 @@ import {
   createOwnedContainer, removeOwnedContainer, UnconfirmedContainerOwnershipError,
 } from './owned-container.mjs';
 import { inspectKeycloakPair, prepareFederatedMcp } from './federated-mcp.mjs';
+import { recorder } from './trace.mjs';
 
 const VERSION = '26.8.1';
 const DIGEST = 'sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244';
@@ -80,16 +81,18 @@ function runOwnershipRegression() {
     assert.equal(docker(['inspect', '--format', '{{.Id}}', fixtureId]), fixtureId);
     cases.push({ name: 'container_name_collision_preserves_existing_owned_fixture', passed: true });
     console.log('PASS container_name_collision_preserves_existing_owned_fixture');
+    recorder.local({ name: 'container_name_collision_preserves_existing_owned_fixture', outcome: 'ok', detail: 'docker create with a used name failed (already in use); the first container was still present' });
   } finally {
     if (fixtureId) {
       assert.equal(removeOwnedContainer(docker, fixtureId, nonce), true);
       cases.push({ name: 'collision_fixture_cleanup_uses_verified_exact_id', passed: true });
       console.log('PASS collision_fixture_cleanup_uses_verified_exact_id');
+      recorder.local({ name: 'collision_fixture_cleanup_uses_verified_exact_id', outcome: 'ok', detail: 'the fixture was removed by its verified container ID and ownership label' });
     }
   }
 }
 
-async function request(url, { method = 'GET', json, form, bearer } = {}) {
+async function request(url, { method = 'GET', json, form, bearer, quiet = false } = {}) {
   const headers = {};
   if (bearer) headers.authorization = `Bearer ${bearer}`;
   let body;
@@ -106,16 +109,21 @@ async function request(url, { method = 'GET', json, form, bearer } = {}) {
     redirect: 'error',
   });
   const text = await response.text();
+  const parsed = text ? JSON.parse(text) : null;
+  const trace = recorder.http({
+    method, url, form, json, bearer, status: response.status, body: parsed, responseHeaders: response.headers, quiet,
+  });
   return {
     status: response.status,
-    body: text ? JSON.parse(text) : null,
+    body: parsed,
     location: response.headers.get('location'),
+    trace,
   };
 }
 
 async function admin(path, method = 'GET', json) {
   const response = await request(`${BASE}/admin/realms/${path}`, {
-    method, json, bearer: adminToken,
+    method, json, bearer: adminToken, quiet: true,
   });
   assert(
     response.status >= 200 && response.status < 300,
@@ -158,9 +166,11 @@ async function grant(jwt, extra = {}) {
   });
 }
 
-function record(name, response, expectedStatus, expectedError) {
+function record(name, response, expectedStatus, expectedError, note) {
   assert.equal(response.status, expectedStatus, `${name}: unexpected HTTP status ${response.status}`);
   if (expectedError) assert.equal(response.body.error, expectedError, `${name}: unexpected OAuth error ${response.body.error}`);
+  recorder.name(response.trace, name);
+  if (note) recorder.note(response.trace, note);
   const result = { name, passed: true, http_status: response.status };
   // Only OAuth error identifiers, never raw response bodies or JWTs, enter the report.
   if (response.body?.error) result.oauth_error = response.body.error;
@@ -169,33 +179,34 @@ function record(name, response, expectedStatus, expectedError) {
 }
 
 function verifyAccessToken(jwt, { audience = 'lab-api' } = {}) {
-  assert.equal(jwt.split('.').length, 3);
+  assert.equal(jwt.split('.').length, 3, 'InvalidJwt');
   const [header64, payload64, signature64] = jwt.split('.');
   const header = JSON.parse(Buffer.from(header64, 'base64url'));
   const claims = JSON.parse(Buffer.from(payload64, 'base64url'));
-  assert.equal(header.alg, 'RS256');
+  assert.equal(header.alg, 'RS256', 'InvalidJwtAlgorithm');
   const jwk = jwks.keys.find((key) => key.kid === header.kid && key.kty === 'RSA');
-  assert(jwk, 'Unknown signing key');
+  assert(jwk, 'UnknownSigningKey');
   assert(verify(
     'RSA-SHA256',
     Buffer.from(`${header64}.${payload64}`),
     createPublicKey({ key: jwk, format: 'jwk' }),
     Buffer.from(signature64, 'base64url'),
-  ), 'Bad access token signature');
-  assert.equal(claims.iss, ISSUER);
-  assert.equal(claims.azp, CLIENT);
-  assert.equal(claims.sub, linkedUserId);
-  assert(claims.exp > Math.floor(Date.now() / 1000), 'Expired access token');
-  if (claims.nbf !== undefined) assert(claims.nbf <= Math.floor(Date.now() / 1000));
+  ), 'InvalidJwtSignature');
+  assert.equal(claims.iss, ISSUER, 'WrongIssuer');
+  assert.equal(claims.azp, CLIENT, 'WrongAuthorizedParty');
+  assert.equal(claims.sub, linkedUserId, 'WrongSubject');
+  assert(claims.exp > Math.floor(Date.now() / 1000), 'ExpiredJwt');
+  if (claims.nbf !== undefined) assert(claims.nbf <= Math.floor(Date.now() / 1000), 'JwtNotYetValid');
   const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  assert(audiences.includes(audience), 'Wrong resource audience');
-  assert((claims.scope ?? '').split(' ').includes('lab.read'), 'Missing resource scope');
+  assert(audiences.includes(audience), 'WrongAudience');
+  assert((claims.scope ?? '').split(' ').includes('lab.read'), 'MissingScope');
   return claims;
 }
 
 async function configure() {
   const login = await request(`${BASE}/realms/master/protocol/openid-connect/token`, {
     method: 'POST',
+    quiet: true,
     form: {
       grant_type: 'password', client_id: 'admin-cli',
       username: 'lab-admin', password: ADMIN_PASSWORD,
@@ -281,11 +292,13 @@ async function runTests() {
   assert.equal(positive.body.refresh_token, undefined, 'JWT grants must not return a refresh token');
   cases.push({ name: 'idjag_exchange_returns_no_refresh_token', passed: true });
   console.log('PASS idjag_exchange_returns_no_refresh_token');
+  recorder.local({ name: 'idjag_exchange_returns_no_refresh_token', outcome: 'ok', detail: 'the 200 response above has no refresh_token' });
   accessToken = positive.body.access_token;
   jwks = (await request(`${ISSUER}/protocol/openid-connect/certs`)).body;
   accessClaims = verifyAccessToken(accessToken);
   tokenInspection = inspectKeycloakPair(validAssertion, accessToken);
   cases.push({ name: 'issued_access_token_signature_issuer_subject_client_audience_scope', passed: true });
+  recorder.local({ name: 'issued_access_token_signature_issuer_subject_client_audience_scope', outcome: 'ok', detail: 'verified with the realm keys (JWKS): RS256 signature, iss, azp, sub, aud, scope, exp' });
 
   const callerIntrospection = await request(`${ISSUER}/protocol/openid-connect/token/introspect`, {
     method: 'POST',
@@ -315,7 +328,7 @@ async function runTests() {
     ['idjag_multiple_audiences_rejected', assertion({ claims: { aud: [ISSUER, `${BASE}/other`] } })],
     ['idjag_untrusted_issuer_rejected', assertion({ claims: { iss: `${BASE}/untrusted-issuer` } })],
     ['idjag_unlinked_subject_rejected', assertion({ claims: { sub: 'not-linked' } })],
-    ['idjag_untrusted_signing_key_rejected', assertion({ key: otherKey })],
+    ['idjag_untrusted_signing_key_rejected', assertion({ key: otherKey }), 'the assertion is signed with another RSA key than the one registered in Keycloak; kid and claims are unchanged'],
     ['idjag_expired_rejected', assertion({ claims: {
       exp: Math.floor(Date.now() / 1000) - 60, iat: Math.floor(Date.now() / 1000) - 120,
     } })],
@@ -323,15 +336,16 @@ async function runTests() {
     ['idjag_future_iat_rejected', assertion({ claims: { iat: Math.floor(Date.now() / 1000) + 60 } })],
     ['idjag_too_old_iat_rejected', assertion({ claims: { iat: Math.floor(Date.now() / 1000) - 240 } })],
   ];
-  for (const [name, jwt] of mutations) {
+  for (const [name, jwt, note] of mutations) {
     const response = await grant(jwt);
-    record(name, response, 400);
+    record(name, response, 400, undefined, note);
     assert(response.body.error, `${name}: expected an OAuth error`);
   }
   const invalidCredentials = await grant(assertion(), {
     client_secret: 'deliberately-incorrect-synthetic-secret',
   });
-  record('invalid_client_credentials_rejected', invalidCredentials, 401);
+  record('invalid_client_credentials_rejected', invalidCredentials, 401, undefined,
+    'client_secret is a deliberately wrong value (the real secret is never printed); the ID-JAG token is valid');
   assert(['invalid_client', 'unauthorized_client'].includes(invalidCredentials.body.error));
   for (const [name, clientId, secret] of [
     ['client_grant_disabled_rejected', 'grant-disabled-client', DISABLED_SECRET],
@@ -395,6 +409,7 @@ async function runTests() {
   assert.equal(usersAfter, usersBefore, 'An unlinked subject must not create or select a local user');
   cases.push({ name: 'idjag_unlinked_subject_creates_no_user', passed: true });
   console.log('PASS idjag_unlinked_subject_creates_no_user');
+  recorder.local({ name: 'idjag_unlinked_subject_creates_no_user', outcome: 'ok', detail: `local users before=${usersBefore} after=${usersAfter}` });
 
   // Controls: these use the generic RFC 7523 validator, NOT the ID-JAG validator.
   record('rfc7523_plain_jwt_without_client_id_accepted', await grant(assertion({
@@ -455,17 +470,26 @@ async function runTests() {
   }
 
   resourceServer = createServer((req, res) => {
+    let presented;
+    let reason = 'Bearer token verified (signature, iss, aud, exp, scope, azp, sub)';
+    res.on('finish', () => recorder.server({
+      source: 'resource', method: req.method, path: String(req.url ?? '').split('?')[0], status: res.statusCode,
+      outcome: res.statusCode === 200 ? 'accepted' : 'rejected', reason, bearer: presented,
+    }));
     if (req.method !== 'GET' || req.url !== '/resource') {
+      reason = 'unknown path';
       res.writeHead(404).end();
       return;
     }
     try {
       const bearer = req.headers.authorization;
-      assert(bearer?.startsWith('Bearer '));
-      verifyAccessToken(bearer.slice(7));
+      assert(bearer?.startsWith('Bearer '), 'MissingBearer');
+      presented = bearer.slice(7);
+      verifyAccessToken(presented);
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ result: 'synthetic protected resource' }));
-    } catch {
+    } catch (error) {
+      reason = `Bearer token rejected (${error?.message ?? 'unknown'})`;
       res.writeHead(401, {
         'content-type': 'application/json',
         'www-authenticate': 'Bearer error="invalid_token"',
@@ -477,6 +501,7 @@ async function runTests() {
     resourceServer.once('error', reject);
     resourceServer.listen(0, '127.0.0.1', resolve);
   });
+  recorder.origin(`http://127.0.0.1:${resourceServer.address().port}`, 'resource');
   const resourceUrl = `http://127.0.0.1:${resourceServer.address().port}/resource`;
   record('resource_accepts_receiver_access_token', await request(resourceUrl, { bearer: accessToken }), 200);
   record('resource_rejects_identity_assertion_as_bearer', await request(resourceUrl, { bearer: assertion() }), 401);
@@ -489,11 +514,17 @@ async function runTests() {
   record('short_lived_access_token_accepted_before_expiry', await request(resourceUrl, { bearer: shortLivedToken }), 200);
   await new Promise((resolve) => setTimeout(resolve, 8000));
   record('short_lived_access_token_rejected_after_expiry', await request(resourceUrl, { bearer: shortLivedToken }), 401);
-  assert.throws(() => verifyAccessToken(accessToken, { audience: 'another-api' }));
+  assert.throws(() => verifyAccessToken(accessToken, { audience: 'another-api' }), /WrongAudience/);
   cases.push({ name: 'resource_audience_validation_rejects_another_api', passed: true });
+  recorder.local({
+    name: 'resource_audience_validation_rejects_another_api', outcome: 'rejected', token: recorder.token(accessToken, 'access'),
+    detail: `required aud=another-api, but the token has aud=${accessClaims.aud}: WrongAudience`,
+  });
 }
 
 try {
+  recorder.reset();
+  recorder.origin(BASE, 'keycloak');
   console.log(`Starting isolated localhost-only Keycloak ${VERSION}`);
   docker(['image', 'inspect', IMAGE]);
   if (FEDERATED) {
@@ -511,8 +542,9 @@ try {
     '--publish', `127.0.0.1:${PORT}:8080`,
     '--env', 'KC_BOOTSTRAP_ADMIN_USERNAME=lab-admin',
     '--env', 'KC_BOOTSTRAP_ADMIN_PASSWORD',
-    '--env', 'KC_HTTP_ACCESS_LOG_ENABLED=false',
+    '--env', 'KC_HTTP_ACCESS_LOG_ENABLED=true',
     IMAGE, 'start-dev',
+    '--log-level=INFO,org.keycloak.events:DEBUG',
     '--features=jwt-authorization-grant,identity-assertion-jwt,token-exchange-standard',
     '--hostname', BASE,
     ],
@@ -524,7 +556,7 @@ try {
   const deadline = Date.now() + 180000;
   while (Date.now() < deadline) {
     try {
-      const response = await request(`${BASE}/realms/master/.well-known/openid-configuration`);
+      const response = await request(`${BASE}/realms/master/.well-known/openid-configuration`, { quiet: true });
       if (response.status === 200) { ready = true; break; }
     } catch { /* Startup connection failures are expected until the readiness deadline. */ }
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -628,6 +660,17 @@ try {
   }
   if (resourceServer) await new Promise((resolve) => resourceServer.close(resolve));
   let removed = false;
+  if (report && containerId && !report.blocker) {
+    try {
+      const logs = spawnSync('docker', ['logs', containerId], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      report.trace = recorder.finalize({ keycloakLog: `${logs.stdout ?? ''}\n${logs.stderr ?? ''}`, realm: REALM });
+    } catch (error) {
+      report.passed = false;
+      report.blocker = 'TraceSafetyCheckFailed';
+      console.error(`Evidence trace not saved: ${String(error?.message ?? 'unknown').split('\n')[0].slice(0, 80)}`);
+      process.exitCode = 1;
+    }
+  }
   if (containerId) {
     try {
       removed = removeOwnedContainer(docker, containerId, ownershipNonce);

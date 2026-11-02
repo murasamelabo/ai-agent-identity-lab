@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderKeycloakTokenView, selectLatestTokenReport } from '../keycloak/federated-mcp.mjs';
+import { renderFederatedRunView, renderFederatedView, renderKeycloakView } from '../keycloak/trace.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.argv[2];
@@ -138,35 +139,12 @@ try {
     console.log('FederatedPrepare completed: receiver realm, issuer trust, user link, and MCP server were configured and verified; owned services are now closed.');
     process.exit(0);
   }
-  const selected = mode === 'Keycloak' ? {
-    idjag_receiver_accepts_valid_assertion: 'idjag_exchange',
-    idjag_replay_rejected: 'replay_rejected',
-    idjag_client_binding_rejected: 'wrong_client_rejected',
-    idjag_wrong_audience_rejected: 'wrong_audience_rejected',
-    idjag_untrusted_signing_key_rejected: 'wrong_signing_key_rejected',
-    idjag_expired_rejected: 'expired_assertion_rejected',
-    native_idjag_issuance_via_rfc8693_not_supported: 'keycloak_idjag_issuance_not_supported',
-    resource_accepts_receiver_access_token: 'resource_access',
-    resource_rejects_identity_assertion_as_bearer: 'assertion_not_an_access_token',
-  } : {
-    real_entra_user_signature_issuer_audience_expiry_scope_verified: 'real_entra_token_verified',
-    custom_broker_issues_and_client_verifies_real_entra_backed_idjag: 'custom_broker_issues_idjag',
-    native_keycloak_accepts_idjag_and_issues_exact_mcp_audience_token: 'keycloak_issues_mcp_token',
-    mcp_initialize_negotiates_pinned_protocol_and_tools: 'mcp_initialize',
-    mcp_tools_list_over_authenticated_streamable_http: 'mcp_tools_list',
-    mcp_tools_call_reads_authorized_synthetic_document: 'mcp_tools_call',
-    mcp_tools_call_denies_other_synthetic_user_document: 'other_document_denied',
-    mcp_rejects_original_entra_token_as_resource_bearer: 'original_token_rejected',
-  };
-  const useSelected = mode === 'FederatedRun';
-  if (useSelected) assert(Object.keys(selected).every((name) => observed.has(name)));
-  console.log(useSelected ? 'Actual process output (selected known checks):' : 'Actual process output (known test names only):');
-  for (const name of useSelected ? Object.keys(selected) : observed) {
-    console.log(`PASS ${useSelected ? selected[name] : name}`);
-  }
-  console.log(`Verified current run: ${report.tests.length} / ${report.tests.length} checks.`);
+  const view = mode === 'Keycloak' ? renderKeycloakView(report)
+    : mode === 'Federated' ? renderFederatedView(report) : renderFederatedRunView(report);
+  console.log('Evidence of this run (requests, responses, token excerpts and server logs; secrets and identities masked):');
+  for (const line of view) console.log(line);
   console.log('Owned container removed; temporary services closed.');
-  if (mode === 'Federated') {
+  if (mode === 'Federated' || mode === 'FederatedRun') {
     console.log('CUSTOM broker prototype, not native Entra ID-JAG or stable EMA conformance.');
   }
 } catch {

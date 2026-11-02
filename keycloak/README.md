@@ -195,6 +195,29 @@ positive/negative/control tests, limitations, and exact cleanup outcome.
 The report substitutes `<linked-local-user>` for the random internal user UUID.
 No result is a mock and no raw JWT is included.
 
+The report also carries `trace` (schema `shoten.lab-trace.v1`): a closed, masked
+record of every request and response (form fields, token headers and selected
+claims, HTTP status, OAuth error), the matching Keycloak event and access-log
+lines, and the decision log of the in-process servers. Tokens, client secrets,
+tenant/object IDs and e-mail addresses are never stored, and `trace.mjs` refuses
+to finalize a trace that still contains a known identifier or token material.
+`lab.ps1 -Action Keycloak` renders this trace, instead of a list of test names:
+numbered checks, what was sent, the HTTP status and OAuth error, and the reason
+Keycloak logged. Every rendered line is checked for non-ASCII, JWT-like,
+GUID-like, opaque-token and e-mail content before it is printed.
+
+For every request that carries a token, the view shows the token that was
+actually sent as a masked header and claim excerpt plus a fingerprint (the first
+eight hex digits of the SHA-256 of the whole JWT, signature included), so that
+the same token is recognizable as the same token. Only the first valid ID-JAG
+token is expanded; for each rejected case the view lists just the claims that
+differ from it, each followed by the valid value (`[valid: ...]`; time claims
+are shown relative to the send time, `now`). For a Bearer token presented to the
+resource server, a claim that does not satisfy the server's requirement is
+followed by the required value (`[required: ...]`). Reasons such as
+`UnknownSigningKey` are glossed in plain words. `kid` values are shown only for
+the lab's own key name; signatures, `jti` and real key IDs are never shown.
+
 The checked-in run on **2026-10-18** passed **36 integration checks**, using
 Node.js **v24.18.0** and the pinned Keycloak image. The six ownership unit tests
 also passed. Its owned container
