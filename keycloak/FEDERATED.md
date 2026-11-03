@@ -191,6 +191,10 @@ arbitrary JSON API and naming it MCP.
 - exact owned container identity and verified cleanup outcomes;
 - explicit conformance gaps and limitations.
 
+The 36 checks (number, the condition that was changed, the expected status and the logged reason) are cataloged
+in Japanese in [../docs/verification-patterns.md](../docs/verification-patterns.md); the numbers match the
+rendered view.
+
 No raw JWT, secret, actual cloud app/user/tenant ID, user email/name, private
 state handle, or private path belongs in the report. The local Docker UUID/name
 and loopback URLs are newly generated lab identifiers, not Entra identifiers.

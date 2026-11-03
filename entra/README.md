@@ -116,6 +116,9 @@ If the first API A silent user acquisition is blocked, dependent direct/OBO
 acquisitions are not attempted; the independent app-only acquisition still
 provides useful, honestly labeled partial evidence.
 
+The nine authorization cases (number, condition and expected decision) are cataloged in Japanese in
+[../docs/verification-patterns.md](../docs/verification-patterns.md).
+
 The real run observed that Azure CLI returned **both** consented scopes
 (`Docs.Read Docs.Metadata`) even when requesting just `Docs.Metadata`.
 An initial assumption that this request would create a missing-scope token

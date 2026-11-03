@@ -38,4 +38,4 @@ Pythonオフライン64件、Nodeオフライン22件は実テナントでの成
 - ランチャーの出力検査を維持する。`Keycloak`／`Federated`／`FederatedRun` の画面は、`keycloak/trace.mjs` が記録した閉じた項目(マスク済みの要求・応答・トークン抜粋・サーバーログ)だけから作り、出力前に ASCII のみ・JWT・GUID・長い乱数列・メールアドレスを含まないことを行ごとに検査する。この検査を緩めない。トークン由来の値は、許可したクレーム、ラボが決めた `kid`(`ephemeral-lab-key` など)、SHA-256 の先頭 8 桁の指紋に限り、署名・`jti`・実在の `kid` は出さない。
 - `-ShowRawTokens` は本人がローカル端末で明示的に選ぶ手動確認専用。AIツール／CI／録画／ログへ渡さず、自動実行しない。公開用の `TokenEncoded`／`TokenHeader`／`TokenPayload` は同じ実行の検証済み・マスク済み抜粋だけを表示し、追加取得しない。抜粋も閉じたスキーマと観測ダイジェストで保護する。Base64urlの元ペイロードや署名を公開しない。
 
-技術的根拠と運用詳細: [entra/README.md](entra/README.md)、[keycloak/README.md](keycloak/README.md)、[keycloak/FEDERATED.md](keycloak/FEDERATED.md)。PR の手順は [CONTRIBUTING.md](CONTRIBUTING.md)。
+技術的根拠と運用詳細: [entra/README.md](entra/README.md)、[keycloak/README.md](keycloak/README.md)、[keycloak/FEDERATED.md](keycloak/FEDERATED.md)。許可・拒否パターンの一覧は [docs/verification-patterns.md](docs/verification-patterns.md) で、チェックの件数や拒否の理由を変えたときは、この一覧も更新する。PR の手順は [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -218,6 +218,10 @@ followed by the required value (`[required: ...]`). Reasons such as
 `UnknownSigningKey` are glossed in plain words. `kid` values are shown only for
 the lab's own key name; signatures, `jti` and real key IDs are never shown.
 
+Every check of the Keycloak-only suite (its number, the condition that was changed, the expected status and the
+logged reason) is cataloged in Japanese in [../docs/verification-patterns.md](../docs/verification-patterns.md);
+the numbers match the rendered view.
+
 The checked-in run on **2026-10-18** passed **36 integration checks**, using
 Node.js **v24.18.0** and the pinned Keycloak image. The six ownership unit tests
 also passed. Its owned container
